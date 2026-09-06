@@ -90,6 +90,19 @@
     background:var(--bg);border:1px solid var(--line);color:var(--muted);margin-left:8px;
     vertical-align:middle;
   }
+  code{
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:.85em;background:var(--bg);border:1px solid var(--line);
+    border-radius:4px;padding:1px 5px;
+  }
+  details{margin-top:12px}
+  summary{cursor:pointer;font-size:.85rem;font-weight:600;color:var(--muted)}
+  .attempts{margin-top:10px}
+  .attempt{
+    border:1px solid var(--line);border-radius:8px;padding:10px 12px;
+    margin-bottom:8px;font-size:.82rem;
+  }
+  .attempt a{display:inline-block;margin-top:6px;word-break:break-all}
   [hidden]{display:none !important}
   .skeleton{color:var(--muted)}
   footer.page{color:var(--muted);font-size:.78rem;text-align:center;margin-top:28px}
@@ -226,10 +239,18 @@
    *   2. JSONP via <script> using tqx=...;responseHandler:cb  (no CORS needed)
    * ------------------------------------------------------------------ */
 
+  // Every attempt is recorded so the error screen can show exactly what was
+  // tried and what came back. Guessing at this from a screenshot is hopeless.
+  var attempts = [];
+  function note(url, how, outcome) { attempts.push({ url: url, how: how, outcome: outcome }); }
+
   function gvizUrl(gid, handler) {
+    // tqx is deliberately NOT percent-encoded. ':' and ';' are legal in a query
+    // string, and gviz does not recognise them escaped — an encoded tqx is
+    // silently ignored, which takes responseHandler (and the JSONP path) with it.
     var tqx = 'out:json' + (handler ? ';responseHandler:' + handler : '');
     return 'https://docs.google.com/spreadsheets/d/' + SHEET_ID +
-           '/gviz/tq?tqx=' + encodeURIComponent(tqx) + '&gid=' + encodeURIComponent(gid);
+           '/gviz/tq?tqx=' + tqx + '&gid=' + encodeURIComponent(gid);
   }
 
   function stripWrapper(text) {
@@ -243,13 +264,31 @@
   }
 
   function fetchGviz(gid) {
-    if (typeof fetch !== 'function') return Promise.reject(new Error('no fetch'));
-    return fetch(gvizUrl(gid), { credentials: 'omit' })
+    var url = gvizUrl(gid);
+    if (typeof fetch !== 'function') {
+      note(url, 'fetch', 'this browser has no fetch()');
+      return Promise.reject(new Error('no fetch'));
+    }
+    return fetch(url, { credentials: 'omit', cache: 'no-store' })
       .then(function (r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
+        if (!r.ok) throw new Error('the server answered HTTP ' + r.status);
         return r.text();
       })
-      .then(stripWrapper);
+      .then(function (text) {
+        // A login page means the sheet is not readable without signing in.
+        if (/<html/i.test(text.slice(0, 400))) {
+          throw new Error('got an HTML page instead of data — the sheet is probably not shared publicly');
+        }
+        var parsed = stripWrapper(text);
+        note(url, 'fetch', 'ok');
+        return parsed;
+      })
+      .catch(function (err) {
+        var why = (err && err.message) || String(err);
+        if (err instanceof TypeError) why = 'blocked by the browser (CORS or no network) — ' + why;
+        note(url, 'fetch', why);
+        throw err;
+      });
   }
 
   var jsonpSeq = 0;
@@ -265,22 +304,33 @@
         if (script.parentNode) script.parentNode.removeChild(script);
         clearTimeout(timer);
       }
-      window[name] = function (payload) {
-        if (settled) return;
-        settled = true; cleanup(); resolve(payload);
-      };
-      script.onerror = function () {
+      var url = gvizUrl(gid, name);
+
+      function done(err, payload) {
         if (settled) return;
         settled = true; cleanup();
-        reject(new Error('Could not load the sheet (script error).'));
+        note(url, 'script tag', err ? err.message : 'ok');
+        if (err) reject(err); else resolve(payload);
+      }
+
+      window[name] = function (payload) { done(null, payload); };
+
+      // A network-level failure (blocked, 4xx, 5xx, DNS) fires error on the element.
+      script.onerror = function () {
+        done(new Error('the request itself failed — blocked, or the sheet URL returned an error'));
+      };
+      // The script loaded but never called our handler: it answered with
+      // something other than the JSONP we asked for.
+      script.onload = function () {
+        setTimeout(function () {
+          done(new Error('the sheet answered, but not in the format requested (responseHandler ignored)'));
+        }, 0);
       };
       timer = setTimeout(function () {
-        if (settled) return;
-        settled = true; cleanup();
-        reject(new Error('Timed out loading the sheet.'));
-      }, 20000);
+        done(new Error('timed out after 15s with no answer'));
+      }, 15000);
 
-      script.src = gvizUrl(gid, name);
+      script.src = url;
       document.head.appendChild(script);
     });
   }
@@ -427,12 +477,41 @@
    * Boot
    * ------------------------------------------------------------------ */
 
-  function fatal(msg, extraHtml) {
+  function fatal(msg) {
     $('boot').hidden = true;
-    $('title').textContent = 'Something went wrong';
+    $('title').textContent = 'Could not load the class data';
     $('subtitle').textContent = '';
     setNotice($('fatalMsg'), msg);
-    $('fatalExtra').innerHTML = extraHtml || '';
+
+    var html = '';
+
+    if (location.protocol === 'file:') {
+      html += '<div class="notice warn" style="margin-bottom:12px">' +
+              '<strong>This page was opened straight from a file.</strong> ' +
+              'The address bar starts with <code>file://</code>. In that mode the browser blocks ' +
+              'both the spreadsheet request and the camera. Open it through a web address instead — ' +
+              'your GitHub Pages URL.</div>';
+    }
+
+    html += '<p class="meta" style="margin-top:0">Two things to check:</p>' +
+            '<ul class="plain meta">' +
+            '<li>The spreadsheet is shared as <strong>Anyone with the link → Viewer</strong>.</li>' +
+            '<li>The sheet id and the two tab <code>gid</code> numbers at the top of this file still match the spreadsheet.</li>' +
+            '</ul>';
+
+    if (attempts.length) {
+      html += '<details style="margin-top:14px"><summary>What was tried (' + attempts.length + ')</summary><div class="attempts">';
+      attempts.forEach(function (a) {
+        html += '<div class="attempt">' +
+                '<div><strong>' + escapeHtml(a.how) + '</strong> — ' + escapeHtml(a.outcome) + '</div>' +
+                '<a href="' + escapeHtml(a.url) + '" target="_blank" rel="noopener">open this URL in a new tab</a>' +
+                '</div>';
+      });
+      html += '</div><p class="meta">Opening one of those links shows what Google actually replies. ' +
+              'Data means the sheet is fine and the problem is in the page; a sign-in page means it is not shared.</p></details>';
+    }
+
+    $('fatalExtra').innerHTML = html;
     $('fatal').hidden = false;
   }
 
@@ -490,9 +569,8 @@
         render();
       })
       .catch(function (err) {
-        fatal('Could not load the class data. ' + (err && err.message ? err.message : ''),
-              '<p class="meta">Check that the spreadsheet is shared so that anyone with the link can view it, ' +
-              'then reload this page.</p>');
+        fatal('The roster and assignment list could not be read from the spreadsheet.' +
+              (err && err.message ? ' Last error: ' + err.message + '.' : ''));
       });
   }
 
@@ -739,6 +817,25 @@
     return '';
   }
 
+  // A WebM written by MediaRecorder has no duration in its header, so Chrome
+  // reports Infinity and the scrub bar is dead. Seeking far past the end forces
+  // the browser to walk the file and work the real duration out; we then rewind.
+  // This only repairs playback in the page — our own timer remains the source of
+  // truth for how long the recording actually is.
+  function repairSeeking(video) {
+    function attempt() {
+      if (video.duration !== Infinity && !isNaN(video.duration)) return;
+      var onUpdate = function () {
+        video.removeEventListener('timeupdate', onUpdate);
+        video.currentTime = 0;
+      };
+      video.addEventListener('timeupdate', onUpdate);
+      video.currentTime = 1e101;
+    }
+    video.addEventListener('loadedmetadata', attempt);
+    if (video.readyState >= 1) attempt();
+  }
+
   function extFor(mime) {
     var m = String(mime || '').toLowerCase();
     if (m.indexOf('quicktime') > -1) return 'mov';
@@ -866,6 +963,7 @@
     show($('btnRecord'), false);
     show($('btnStop'), true);
     show($('recStatusWrap'), true);
+    show($('recDot'), true);
     $('recDot').classList.add('on');
     $('timerNote').textContent = ' remaining';
     $('recMeta').textContent = 'Recording. It will stop by itself at ' + mmss(assignment.max_seconds) + '.';
@@ -895,6 +993,7 @@
     if (rec.elapsed > assignment.max_seconds) rec.elapsed = assignment.max_seconds;
     rec.stopReason = reason;
     $('recDot').classList.remove('on');
+    show($('recDot'), false);          // a red dot must never outlive the recording
     show($('btnStop'), false);
 
     if (rec.recorder && rec.recorder.state !== 'inactive') {
@@ -925,12 +1024,15 @@
     pb.src = current.objectUrl;
     pb.muted = false;
     show(pb, true);
+    repairSeeking(pb);
 
     show($('btnRedo'), true);
     $('timer').textContent = mmss(rec.elapsed);
-    $('timerNote').textContent = ' recorded';
+    $('timerNote').textContent = ' recorded of ' + mmss(assignment.max_seconds) + ' allowed';
     $('timer').classList.remove('low');
-    $('barFill').style.width = '100%';
+    // The bar shows how much of the allowance was used, not a completion state.
+    $('barFill').style.width =
+      Math.min(100, (rec.elapsed / assignment.max_seconds) * 100).toFixed(1) + '%';
 
     var note = (rec.stopReason === 'timeout')
       ? 'Time’s up — the recording stopped automatically at ' + mmss(assignment.max_seconds) + '. '
@@ -1003,6 +1105,7 @@
       var pb = $('filePlayback');
       pb.src = current.objectUrl;
       show(pb, true);
+      repairSeeking(pb);
 
       refreshSubmit();
     });

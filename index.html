@@ -1,0 +1,1145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Video Submission</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#ffffff; --ink:#16181d; --muted:#5b6270;
+    --line:#d8dce3; --accent:#1d4ed8; --accent-ink:#ffffff;
+    --danger:#b42318; --danger-bg:#fef3f2; --danger-line:#fda29b;
+    --ok:#067647; --ok-bg:#ecfdf3; --warn-bg:#fffaeb; --warn-line:#fedf89; --warn-ink:#93370d;
+    --radius:10px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#101216; --card:#181b21; --ink:#e9ecf1; --muted:#a0a8b8;
+      --line:#2c313b; --accent:#5b8bff; --accent-ink:#0b1020;
+      --danger:#ff9c92; --danger-bg:#2a1614; --danger-line:#6b2b23;
+      --ok:#6fdba0; --ok-bg:#12251c; --warn-bg:#2a2113; --warn-line:#5d4818; --warn-ink:#f5d68a;
+    }
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    padding:24px 16px 64px;
+  }
+  .wrap{max-width:720px;margin:0 auto}
+  header.page{margin-bottom:20px}
+  h1{font-size:1.4rem;margin:0 0 6px;line-height:1.25}
+  .sub{color:var(--muted);font-size:.9rem;margin:0}
+  .card{
+    background:var(--card); border:1px solid var(--line); border-radius:var(--radius);
+    padding:18px; margin-bottom:16px;
+  }
+  .card h2{font-size:1rem;margin:0 0 12px;letter-spacing:.01em}
+  .instructions{white-space:pre-wrap;margin:0}
+  label{display:block;font-weight:600;font-size:.875rem;margin:0 0 5px}
+  .hint{color:var(--muted);font-size:.8rem;margin:5px 0 0;font-weight:400}
+  select,input[type=text],input[type=email],input[type=file]{
+    width:100%; padding:10px 11px; font:inherit; font-size:.95rem;
+    color:var(--ink); background:var(--card);
+    border:1px solid var(--line); border-radius:8px;
+  }
+  select:disabled,input:disabled{opacity:.6}
+  input[readonly]{background:var(--bg);color:var(--muted)}
+  .field{margin-bottom:14px}
+  .field:last-child{margin-bottom:0}
+  .row{display:flex;gap:10px;flex-wrap:wrap}
+  .row > *{flex:1 1 200px}
+  button{
+    font:inherit;font-weight:600;padding:10px 16px;border-radius:8px;
+    border:1px solid var(--line); background:var(--card); color:var(--ink); cursor:pointer;
+  }
+  button:hover:not(:disabled){border-color:var(--muted)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+  button.danger{background:var(--danger-bg);border-color:var(--danger-line);color:var(--danger)}
+  .btnrow{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  video{
+    width:100%; background:#000; border-radius:8px; display:block;
+    aspect-ratio:16/9; object-fit:contain;
+  }
+  .notice{border-radius:8px;padding:12px 14px;font-size:.9rem;border:1px solid transparent}
+  .notice.err{background:var(--danger-bg);border-color:var(--danger-line);color:var(--danger)}
+  .notice.warn{background:var(--warn-bg);border-color:var(--warn-line);color:var(--warn-ink)}
+  .notice.ok{background:var(--ok-bg);border-color:var(--ok);color:var(--ok)}
+  .meta{color:var(--muted);font-size:.85rem}
+  .timer{
+    font-variant-numeric:tabular-nums; font-weight:700; font-size:1.5rem;
+    letter-spacing:.02em;
+  }
+  .timer.low{color:var(--danger)}
+  .rec-dot{
+    display:inline-block;width:10px;height:10px;border-radius:50%;
+    background:#e5484d;margin-right:8px;vertical-align:middle;
+  }
+  .rec-dot.on{animation:blink 1s steps(2,start) infinite}
+  @keyframes blink{to{visibility:hidden}}
+  .bar{height:6px;background:var(--line);border-radius:99px;overflow:hidden;margin-top:10px}
+  .bar > i{display:block;height:100%;background:var(--accent);width:0%;transition:width .2s linear}
+  ul.plain{margin:8px 0 0;padding-left:20px}
+  ul.plain li{margin:3px 0}
+  a{color:var(--accent)}
+  .tag{
+    display:inline-block;font-size:.72rem;font-weight:700;letter-spacing:.06em;
+    text-transform:uppercase;padding:3px 8px;border-radius:99px;
+    background:var(--bg);border:1px solid var(--line);color:var(--muted);margin-left:8px;
+    vertical-align:middle;
+  }
+  [hidden]{display:none !important}
+  .skeleton{color:var(--muted)}
+  footer.page{color:var(--muted);font-size:.78rem;text-align:center;margin-top:28px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="page">
+    <h1 id="title">Loading assignment…</h1>
+    <p class="sub" id="subtitle">Reading the roster and assignment list.</p>
+  </header>
+
+  <div id="boot" class="card skeleton">Loading…</div>
+
+  <div id="fatal" class="card" hidden>
+    <div class="notice err" id="fatalMsg"></div>
+    <div id="fatalExtra"></div>
+  </div>
+
+  <section id="instructionsCard" class="card" hidden>
+    <h2>Instructions</h2>
+    <p class="instructions" id="instructions"></p>
+    <p class="meta" id="dueLine"></p>
+  </section>
+
+  <section id="closedCard" class="card" hidden>
+    <div class="notice err">
+      <strong>This assignment is closed.</strong><br>
+      Submissions are no longer being accepted. Talk to your teacher if you think this is a mistake.
+    </div>
+  </section>
+
+  <form id="form" hidden autocomplete="off">
+
+    <section class="card">
+      <h2>Who are you?</h2>
+
+      <div class="field">
+        <label for="period">Period</label>
+        <select id="period"><option value="">Select a period…</option></select>
+      </div>
+
+      <div class="field">
+        <label for="student">Name</label>
+        <select id="student" disabled><option value="">Select your period first…</option></select>
+        <p class="hint" id="studentHint">Sorted by last name. If two students share a name, the student ID tells them apart.</p>
+      </div>
+
+      <div class="field" id="emailField" hidden>
+        <label for="email">Email</label>
+        <input type="email" id="email" inputmode="email" autocomplete="off">
+        <p class="hint" id="emailHint"></p>
+      </div>
+
+      <div class="field" id="groupField" hidden>
+        <label for="group">Group name / members</label>
+        <input type="text" id="group" placeholder="e.g. Table 3 — Priya, Luis, Rin">
+        <p class="hint">Required for this assignment. List everyone in your group.</p>
+      </div>
+    </section>
+
+    <section class="card" id="recordCard" hidden>
+      <h2>Record <span class="tag" id="limitTag"></span></h2>
+
+      <div id="recUnsupported" class="notice warn" hidden></div>
+
+      <div id="recUI">
+        <video id="preview" playsinline muted autoplay hidden></video>
+        <video id="playback" playsinline controls hidden></video>
+
+        <div id="recStatusWrap" class="field" style="margin-top:12px" hidden>
+          <div><span class="rec-dot" id="recDot"></span><span class="timer" id="timer">0:00</span>
+            <span class="meta" id="timerNote"></span></div>
+          <div class="bar"><i id="barFill"></i></div>
+        </div>
+
+        <div class="btnrow" style="margin-top:12px">
+          <button type="button" id="btnCamera">Start camera</button>
+          <button type="button" id="btnRecord" hidden>Start recording</button>
+          <button type="button" id="btnStop" class="danger" hidden>Stop</button>
+          <button type="button" id="btnRedo" hidden>Record again</button>
+        </div>
+
+        <p class="meta" id="recMeta" style="margin-top:10px"></p>
+        <div id="recError" class="notice err" style="margin-top:10px" hidden></div>
+      </div>
+    </section>
+
+    <section class="card" id="uploadCard" hidden>
+      <h2>Choose a video file <span class="tag" id="sizeTag"></span></h2>
+      <div class="field">
+        <input type="file" id="file" accept="video/*">
+        <p class="hint" id="fileHint"></p>
+      </div>
+      <div id="fileError" class="notice err" hidden></div>
+      <video id="filePlayback" playsinline controls hidden style="margin-top:10px"></video>
+    </section>
+
+    <section class="card">
+      <h2>Submit</h2>
+      <div class="btnrow">
+        <button type="submit" id="btnSubmit" class="primary" disabled>Submit video</button>
+        <span class="meta" id="submitHint">Nothing is sent anywhere yet.</span>
+      </div>
+      <div id="formError" class="notice err" style="margin-top:12px" hidden></div>
+      <div id="formOk" class="notice ok" style="margin-top:12px" hidden></div>
+    </section>
+
+  </form>
+
+  <footer class="page">Phase 1 — local only. No video leaves this device.</footer>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ------------------------------------------------------------------ *
+   * Config
+   * ------------------------------------------------------------------ */
+
+  var SHEET_ID   = '1S6KCdUa7EgeCktuRIA_-T6S1cmqZWstsX5NwU5-DiJU';
+  var GID_ROSTER = '968816023';
+  var GID_ASSIGN = '1006326252';
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  /* ------------------------------------------------------------------ *
+   * gviz loading
+   *
+   * The response is JSON wrapped in a JS callback. Two paths:
+   *   1. fetch + strip the wrapper (works when CORS headers are present)
+   *   2. JSONP via <script> using tqx=...;responseHandler:cb  (no CORS needed)
+   * ------------------------------------------------------------------ */
+
+  function gvizUrl(gid, handler) {
+    var tqx = 'out:json' + (handler ? ';responseHandler:' + handler : '');
+    return 'https://docs.google.com/spreadsheets/d/' + SHEET_ID +
+           '/gviz/tq?tqx=' + encodeURIComponent(tqx) + '&gid=' + encodeURIComponent(gid);
+  }
+
+  function stripWrapper(text) {
+    // Typical shape: /*O_o*/\ngoogle.visualization.Query.setResponse({...});
+    var start = text.indexOf('{');
+    var end   = text.lastIndexOf('}');
+    if (start === -1 || end === -1 || end < start) {
+      throw new Error('Unrecognized gviz response');
+    }
+    return JSON.parse(text.slice(start, end + 1));
+  }
+
+  function fetchGviz(gid) {
+    if (typeof fetch !== 'function') return Promise.reject(new Error('no fetch'));
+    return fetch(gvizUrl(gid), { credentials: 'omit' })
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.text();
+      })
+      .then(stripWrapper);
+  }
+
+  var jsonpSeq = 0;
+  function jsonpGviz(gid) {
+    return new Promise(function (resolve, reject) {
+      var name = '__gvizcb' + (Date.now().toString(36)) + (jsonpSeq++);
+      var script = document.createElement('script');
+      var timer;
+      var settled = false;
+
+      function cleanup() {
+        try { delete window[name]; } catch (e) { window[name] = undefined; }
+        if (script.parentNode) script.parentNode.removeChild(script);
+        clearTimeout(timer);
+      }
+      window[name] = function (payload) {
+        if (settled) return;
+        settled = true; cleanup(); resolve(payload);
+      };
+      script.onerror = function () {
+        if (settled) return;
+        settled = true; cleanup();
+        reject(new Error('Could not load the sheet (script error).'));
+      };
+      timer = setTimeout(function () {
+        if (settled) return;
+        settled = true; cleanup();
+        reject(new Error('Timed out loading the sheet.'));
+      }, 20000);
+
+      script.src = gvizUrl(gid, name);
+      document.head.appendChild(script);
+    });
+  }
+
+  function loadSheet(gid) {
+    return fetchGviz(gid).catch(function () { return jsonpGviz(gid); });
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Table helpers — everything trimmed on read
+   * ------------------------------------------------------------------ */
+
+  function cellText(cell) {
+    if (cell === null || cell === undefined) return '';
+    // Prefer the formatted value: numeric columns arrive as {v:1.0, f:"1"}.
+    if (cell.f !== null && cell.f !== undefined && cell.f !== '') return String(cell.f).trim();
+    if (cell.v === null || cell.v === undefined) return '';
+    return String(cell.v).trim();
+  }
+
+  function normKey(s) {
+    return String(s || '').trim().toLowerCase().replace(/\s+/g, '_');
+  }
+
+  // Turn a gviz payload into an array of plain objects keyed by column label.
+  function toRecords(payload) {
+    if (!payload || !payload.table) throw new Error('Empty sheet response');
+    var cols = payload.table.cols || [];
+    var rows = payload.table.rows || [];
+    var names = cols.map(function (c, i) {
+      return normKey(c && (c.label || c.id)) || ('col' + i);
+    });
+    return rows.map(function (row) {
+      var cells = (row && row.c) || [];
+      var obj = {};
+      for (var i = 0; i < names.length; i++) obj[names[i]] = cellText(cells[i]);
+      return obj;
+    }).filter(function (obj) {
+      // Drop fully blank rows.
+      return Object.keys(obj).some(function (k) { return obj[k] !== ''; });
+    });
+  }
+
+  function isTrue(v) {
+    var s = String(v || '').trim().toLowerCase();
+    return s === 'true' || s === 'yes' || s === 'y' || s === '1';
+  }
+
+  function toNumber(v, fallback) {
+    var n = parseFloat(String(v || '').replace(/[^0-9.\-]/g, ''));
+    return isFinite(n) ? n : fallback;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Misc utilities
+   * ------------------------------------------------------------------ */
+
+  function qs(name) {
+    var m = new RegExp('[?&]' + name + '=([^&#]*)').exec(window.location.search);
+    return m ? decodeURIComponent(m[1].replace(/\+/g, ' ')).trim() : '';
+  }
+
+  function mmss(totalSeconds) {
+    var s = Math.max(0, Math.round(totalSeconds));
+    var m = Math.floor(s / 60);
+    return m + ':' + String(s % 60).padStart(2, '0');
+  }
+
+  function humanBytes(n) {
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(0) + ' KB';
+    return (n / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+
+  function slug(s) {
+    return String(s || '')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')  // strip diacritics
+      .replace(/[^A-Za-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'x';
+  }
+
+  function stamp(d) {
+    var p = function (n) { return String(n).padStart(2, '0'); };
+    return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' +
+           p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+  }
+
+  function show(el, on) { el.hidden = !on; }
+
+  function setNotice(el, msg) {
+    if (!msg) { el.hidden = true; el.textContent = ''; return; }
+    el.textContent = msg;
+    el.hidden = false;
+  }
+
+  var collator = (function () {
+    try { return new Intl.Collator(undefined, { sensitivity: 'base', numeric: true }); }
+    catch (e) { return { compare: function (a, b) { return a < b ? -1 : a > b ? 1 : 0; } }; }
+  })();
+
+  /* ------------------------------------------------------------------ *
+   * THE SUBMISSION SEAM
+   *
+   * Everything that could ever touch the network lives in here.
+   * Phase 1: trigger a local download. Phase 2: POST to Apps Script.
+   * No other code in this file knows how submission works.
+   * ------------------------------------------------------------------ */
+
+  function uploadVideo(blob, metadata) {
+    return new Promise(function (resolve) {
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = metadata.filename;
+      a.rel = 'noopener';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+
+      // Handy while building Phase 2: the exact payload that will be posted.
+      try { console.log('[uploadVideo] metadata', metadata); } catch (e) {}
+
+      resolve({ ok: true, mode: 'local-download', filename: metadata.filename });
+    });
+  }
+
+  /* ------------------------------------------------------------------ *
+   * App state
+   * ------------------------------------------------------------------ */
+
+  var assignment = null;   // matched assignment record
+  var roster = [];         // [{student_id, last_name, first_name, period, email, active}]
+  var periodsAllowed = []; // strings
+  var current = {
+    blob: null,
+    source: '',            // 'record' | 'upload'
+    mime: '',
+    seconds: null,         // measured by our own timer; null for uploads
+    objectUrl: null
+  };
+
+  /* ------------------------------------------------------------------ *
+   * Boot
+   * ------------------------------------------------------------------ */
+
+  function fatal(msg, extraHtml) {
+    $('boot').hidden = true;
+    $('title').textContent = 'Something went wrong';
+    $('subtitle').textContent = '';
+    setNotice($('fatalMsg'), msg);
+    $('fatalExtra').innerHTML = extraHtml || '';
+    $('fatal').hidden = false;
+  }
+
+  function boot() {
+    var wanted = qs('a');
+
+    Promise.all([loadSheet(GID_ROSTER), loadSheet(GID_ASSIGN)])
+      .then(function (payloads) {
+        var rosterRows = toRecords(payloads[0]);
+        var assignRows = toRecords(payloads[1]);
+
+        roster = rosterRows
+          .map(function (r) {
+            return {
+              student_id: r.student_id,
+              last_name:  r.last_name,
+              first_name: r.first_name,
+              period:     r.period,
+              email:      r.email,
+              active:     isTrue(r.active)
+            };
+          })
+          .filter(function (r) { return r.student_id && r.period; });
+
+        if (!wanted) {
+          return listAssignments(assignRows, 'No assignment was specified in the link.');
+        }
+
+        var match = null;
+        for (var i = 0; i < assignRows.length; i++) {
+          if (assignRows[i].assignment_id &&
+              assignRows[i].assignment_id.toLowerCase() === wanted.toLowerCase()) {
+            match = assignRows[i];
+            break;
+          }
+        }
+        if (!match) {
+          return listAssignments(assignRows, 'No assignment matches "' + wanted + '".');
+        }
+
+        assignment = {
+          id:             match.assignment_id,
+          title:          match.title || match.assignment_id,
+          periods:        match.periods,
+          status:         String(match.status || '').toLowerCase(),
+          group_required: isTrue(match.group_required),
+          due_date:       match.due_date,
+          allow_record:   isTrue(match.allow_record),
+          allow_upload:   isTrue(match.allow_upload),
+          max_seconds:    toNumber(match.max_seconds, 120),
+          max_mb:         toNumber(match.max_mb, 40),
+          instructions:   match.instructions
+        };
+
+        render();
+      })
+      .catch(function (err) {
+        fatal('Could not load the class data. ' + (err && err.message ? err.message : ''),
+              '<p class="meta">Check that the spreadsheet is shared so that anyone with the link can view it, ' +
+              'then reload this page.</p>');
+      });
+  }
+
+  function listAssignments(assignRows, why) {
+    $('boot').hidden = true;
+    $('title').textContent = 'Pick an assignment';
+    $('subtitle').textContent = why;
+
+    var open = assignRows.filter(function (r) {
+      return String(r.status || '').toLowerCase() !== 'closed' && r.assignment_id;
+    });
+    var html = '<h2>Open assignments</h2>';
+    if (!open.length) {
+      html += '<p class="meta">There are no open assignments right now.</p>';
+    } else {
+      html += '<ul class="plain">' + open.map(function (r) {
+        var href = window.location.pathname + '?a=' + encodeURIComponent(r.assignment_id);
+        return '<li><a href="' + href + '">' + escapeHtml(r.title || r.assignment_id) + '</a>' +
+               ' <span class="meta">' + escapeHtml(r.assignment_id) + '</span></li>';
+      }).join('') + '</ul>';
+    }
+    var card = document.createElement('section');
+    card.className = 'card';
+    card.innerHTML = html;
+    $('fatal').parentNode.insertBefore(card, $('fatal'));
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Render from the assignment row
+   * ------------------------------------------------------------------ */
+
+  function render() {
+    $('boot').hidden = true;
+    $('title').textContent = assignment.title;
+    $('subtitle').textContent = assignment.id;
+
+    $('instructions').textContent = assignment.instructions || '';
+    $('dueLine').textContent = assignment.due_date ? 'Due ' + assignment.due_date : '';
+    show($('instructionsCard'), true);
+
+    if (assignment.status === 'closed') {
+      show($('closedCard'), true);
+      return;                     // no form at all
+    }
+
+    show($('form'), true);
+
+    // ---- periods -----------------------------------------------------
+    var rosterPeriods = uniqueSorted(roster.map(function (r) { return r.period; }));
+    var spec = String(assignment.periods || '').trim().toLowerCase();
+    if (spec === '' || spec === 'all' || spec === '*') {
+      periodsAllowed = rosterPeriods;
+    } else {
+      var wanted = {};
+      String(assignment.periods).split(/[,;/|]/).forEach(function (p) {
+        p = p.trim();
+        if (p) wanted[p.toLowerCase()] = true;
+      });
+      periodsAllowed = rosterPeriods.filter(function (p) { return wanted[p.toLowerCase()]; });
+    }
+
+    var sel = $('period');
+    sel.innerHTML = '<option value="">Select a period…</option>';
+    periodsAllowed.forEach(function (p) {
+      var o = document.createElement('option');
+      o.value = p;
+      o.textContent = 'Period ' + p;
+      sel.appendChild(o);
+    });
+    if (periodsAllowed.length === 1) {
+      sel.value = periodsAllowed[0];
+      fillStudents();
+    }
+
+    // ---- group -------------------------------------------------------
+    show($('groupField'), assignment.group_required);
+
+    // ---- capture options --------------------------------------------
+    show($('recordCard'), assignment.allow_record);
+    show($('uploadCard'), assignment.allow_upload);
+
+    $('limitTag').textContent = 'max ' + mmss(assignment.max_seconds);
+    $('sizeTag').textContent = 'max ' + assignment.max_mb + ' MB';
+    $('fileHint').textContent = 'Video files only, up to ' + assignment.max_mb + ' MB.';
+
+    if (assignment.allow_record) setupRecorder();
+    if (assignment.allow_upload) setupFilePicker();
+
+    if (!assignment.allow_record && !assignment.allow_upload) {
+      setNotice($('formError'),
+        'This assignment has neither recording nor file upload enabled. Ask your teacher to fix the assignment settings.');
+    }
+
+    refreshSubmit();
+  }
+
+  function uniqueSorted(values) {
+    var seen = {}, out = [];
+    values.forEach(function (v) {
+      if (v !== '' && !seen[v]) { seen[v] = true; out.push(v); }
+    });
+    out.sort(function (a, b) {
+      var na = parseFloat(a), nb = parseFloat(b);
+      if (isFinite(na) && isFinite(nb) && na !== nb) return na - nb;
+      return collator.compare(a, b);
+    });
+    return out;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Roster dropdowns
+   * ------------------------------------------------------------------ */
+
+  function fillStudents() {
+    var period = $('period').value;
+    var sel = $('student');
+    sel.innerHTML = '';
+    hideEmail();
+
+    if (!period) {
+      sel.disabled = true;
+      sel.innerHTML = '<option value="">Select your period first…</option>';
+      refreshSubmit();
+      return;
+    }
+
+    var list = roster.filter(function (r) {
+      return r.period === period && r.active;
+    });
+
+    // A student can legitimately appear twice under one id (two periods);
+    // within one period, keep one row per student_id.
+    var byId = {}, unique = [];
+    list.forEach(function (r) {
+      if (byId[r.student_id]) return;
+      byId[r.student_id] = true;
+      unique.push(r);
+    });
+
+    unique.sort(function (a, b) {
+      return collator.compare(a.last_name, b.last_name)
+          || collator.compare(a.first_name, b.first_name)
+          || collator.compare(a.student_id, b.student_id);
+    });
+
+    // Detect duplicate display names so we can disambiguate them.
+    var nameCount = {};
+    unique.forEach(function (r) {
+      var k = (r.last_name + '|' + r.first_name).toLowerCase();
+      nameCount[k] = (nameCount[k] || 0) + 1;
+    });
+
+    sel.disabled = false;
+    var head = document.createElement('option');
+    head.value = '';
+    head.textContent = 'Select your name…';
+    sel.appendChild(head);
+
+    unique.forEach(function (r) {
+      var o = document.createElement('option');
+      o.value = r.student_id;                     // the key is always the id
+      var label = r.last_name + ', ' + r.first_name;
+      var k = (r.last_name + '|' + r.first_name).toLowerCase();
+      if (nameCount[k] > 1) {
+        label += '  (ID ' + r.student_id;
+        if (r.email) label += ' · ' + r.email.split('@')[0];
+        label += ')';
+      }
+      o.textContent = label;
+      sel.appendChild(o);
+    });
+
+    $('studentHint').textContent = unique.length
+      ? unique.length + ' student' + (unique.length === 1 ? '' : 's') + ' in period ' + period + ', sorted by last name.'
+      : 'No active students found in period ' + period + '.';
+
+    refreshSubmit();
+  }
+
+  function selectedStudent() {
+    var id = $('student').value;
+    var period = $('period').value;
+    if (!id) return null;
+    for (var i = 0; i < roster.length; i++) {
+      if (roster[i].student_id === id && roster[i].period === period) return roster[i];
+    }
+    for (var j = 0; j < roster.length; j++) {
+      if (roster[j].student_id === id) return roster[j];
+    }
+    return null;
+  }
+
+  function hideEmail() {
+    show($('emailField'), false);
+    $('email').value = '';
+    $('email').readOnly = false;
+  }
+
+  function onStudentChange() {
+    var s = selectedStudent();
+    if (!s) { hideEmail(); refreshSubmit(); return; }
+
+    var box = $('email');
+    if (s.email) {
+      box.value = s.email;
+      box.readOnly = true;
+      $('emailHint').textContent = 'From the class roster.';
+    } else {
+      box.value = '';
+      box.readOnly = false;
+      $('emailHint').textContent = 'We don’t have an email on file for you. Please type the one your teacher should use.';
+    }
+    show($('emailField'), true);
+    refreshSubmit();
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Recorder
+   * ------------------------------------------------------------------ */
+
+  var MIME_CANDIDATES = [
+    'video/webm;codecs=vp9,opus',
+    'video/webm;codecs=vp8,opus',
+    'video/webm;codecs=h264,opus',
+    'video/webm',
+    'video/mp4;codecs=h264,aac',
+    'video/mp4;codecs=avc1',
+    'video/mp4',
+    'video/quicktime'
+  ];
+
+  function pickMime() {
+    if (typeof MediaRecorder === 'undefined') return null;
+    if (typeof MediaRecorder.isTypeSupported !== 'function') return '';  // let the browser decide
+    for (var i = 0; i < MIME_CANDIDATES.length; i++) {
+      if (MediaRecorder.isTypeSupported(MIME_CANDIDATES[i])) return MIME_CANDIDATES[i];
+    }
+    return '';
+  }
+
+  function extFor(mime) {
+    var m = String(mime || '').toLowerCase();
+    if (m.indexOf('quicktime') > -1) return 'mov';
+    if (m.indexOf('mp4') > -1) return 'mp4';
+    if (m.indexOf('webm') > -1) return 'webm';
+    if (m.indexOf('ogg') > -1) return 'ogv';
+    return 'bin';
+  }
+
+  var rec = {
+    stream: null,
+    recorder: null,
+    chunks: [],
+    startedAt: 0,
+    elapsed: 0,
+    tick: null,
+    mime: ''
+  };
+
+  function recorderSupported() {
+    return !!(navigator.mediaDevices &&
+              typeof navigator.mediaDevices.getUserMedia === 'function' &&
+              typeof MediaRecorder !== 'undefined');
+  }
+
+  function setupRecorder() {
+    if (!recorderSupported()) {
+      show($('recUI'), false);
+      setNotice($('recUnsupported'),
+        'This browser can’t record video in the page. ' +
+        (assignment.allow_upload
+          ? 'Record with your phone’s camera app and use the file picker below instead.'
+          : 'Try Chrome on a computer, or Safari on a recent iPhone.'));
+      return;
+    }
+    if (!window.isSecureContext && location.hostname !== 'localhost') {
+      setNotice($('recUnsupported'),
+        'The camera only works over https. Open this page with an https:// address.');
+    }
+
+    $('btnCamera').addEventListener('click', startCamera);
+    $('btnRecord').addEventListener('click', startRecording);
+    $('btnStop').addEventListener('click', function () { stopRecording('manual'); });
+    $('btnRedo').addEventListener('click', resetRecorder);
+    window.addEventListener('pagehide', releaseCamera);
+  }
+
+  function startCamera() {
+    setNotice($('recError'), '');
+    $('btnCamera').disabled = true;
+    $('btnCamera').textContent = 'Starting…';
+
+    navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: true
+    }).then(function (stream) {
+      rec.stream = stream;
+      var v = $('preview');
+      v.srcObject = stream;
+      v.muted = true;                 // avoid howling feedback
+      show(v, true);
+      var p = v.play();
+      if (p && p.catch) p.catch(function () {});
+
+      show($('btnCamera'), false);
+      show($('btnRecord'), true);
+      $('recMeta').textContent = 'Camera on. You have up to ' + mmss(assignment.max_seconds) + '.';
+    }).catch(function (err) {
+      $('btnCamera').disabled = false;
+      $('btnCamera').textContent = 'Start camera';
+      var name = err && err.name ? err.name : '';
+      var msg;
+      if (name === 'NotAllowedError' || name === 'SecurityError') {
+        msg = 'Camera and microphone access was blocked. Allow it in your browser’s address bar, then try again.';
+      } else if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+        msg = 'No camera or microphone was found on this device.';
+      } else if (name === 'NotReadableError') {
+        msg = 'Another app is already using the camera. Close it and try again.';
+      } else {
+        msg = 'Could not start the camera. ' + (err && err.message ? err.message : '');
+      }
+      setNotice($('recError'), msg);
+    });
+  }
+
+  function startRecording() {
+    if (!rec.stream) return;
+    setNotice($('recError'), '');
+    clearCurrent();
+    show($('playback'), false);
+
+    rec.mime = pickMime();
+    rec.chunks = [];
+
+    try {
+      rec.recorder = (rec.mime)
+        ? new MediaRecorder(rec.stream, { mimeType: rec.mime })
+        : new MediaRecorder(rec.stream);
+    } catch (e) {
+      try {
+        rec.recorder = new MediaRecorder(rec.stream);   // last-ditch: browser default
+        rec.mime = '';
+      } catch (e2) {
+        setNotice($('recError'), 'Recording is not supported in this browser.');
+        return;
+      }
+    }
+
+    rec.recorder.ondataavailable = function (ev) {
+      if (ev.data && ev.data.size > 0) rec.chunks.push(ev.data);
+    };
+    rec.recorder.onerror = function (ev) {
+      setNotice($('recError'), 'The recorder stopped unexpectedly. ' +
+        ((ev && ev.error && ev.error.message) || ''));
+      stopRecording('error');
+    };
+    rec.recorder.onstop = finishRecording;
+
+    // Our own clock is the source of truth. Blob duration metadata is
+    // frequently missing or wrong, so it is never consulted.
+    rec.startedAt = Date.now();
+    rec.elapsed = 0;
+    rec.recorder.start(1000);          // timeslice keeps Safari flushing chunks
+
+    show($('btnRecord'), false);
+    show($('btnStop'), true);
+    show($('recStatusWrap'), true);
+    $('recDot').classList.add('on');
+    $('timerNote').textContent = ' remaining';
+    $('recMeta').textContent = 'Recording. It will stop by itself at ' + mmss(assignment.max_seconds) + '.';
+    updateTimer();
+    rec.tick = setInterval(updateTimer, 200);
+  }
+
+  function updateTimer() {
+    rec.elapsed = (Date.now() - rec.startedAt) / 1000;
+    var remaining = assignment.max_seconds - rec.elapsed;
+    if (remaining <= 0) {
+      remaining = 0;
+      $('timer').textContent = mmss(0);
+      $('barFill').style.width = '100%';
+      stopRecording('timeout');
+      return;
+    }
+    $('timer').textContent = mmss(remaining);
+    $('timer').classList.toggle('low', remaining <= 10);
+    $('barFill').style.width =
+      Math.min(100, (rec.elapsed / assignment.max_seconds) * 100).toFixed(1) + '%';
+  }
+
+  function stopRecording(reason) {
+    if (rec.tick) { clearInterval(rec.tick); rec.tick = null; }
+    rec.elapsed = rec.startedAt ? (Date.now() - rec.startedAt) / 1000 : 0;
+    if (rec.elapsed > assignment.max_seconds) rec.elapsed = assignment.max_seconds;
+    rec.stopReason = reason;
+    $('recDot').classList.remove('on');
+    show($('btnStop'), false);
+
+    if (rec.recorder && rec.recorder.state !== 'inactive') {
+      try { rec.recorder.stop(); } catch (e) { finishRecording(); }
+    } else {
+      finishRecording();
+    }
+  }
+
+  function finishRecording() {
+    releaseCamera();
+    show($('preview'), false);
+
+    var type = (rec.recorder && rec.recorder.mimeType) || rec.mime || 'video/webm';
+    var blob = new Blob(rec.chunks, { type: type });
+    rec.chunks = [];
+
+    if (!blob.size) {
+      setNotice($('recError'), 'Nothing was recorded. Try again.');
+      show($('btnRedo'), true);
+      refreshSubmit();
+      return;
+    }
+
+    setCurrent(blob, 'record', type, rec.elapsed);
+
+    var pb = $('playback');
+    pb.src = current.objectUrl;
+    pb.muted = false;
+    show(pb, true);
+
+    show($('btnRedo'), true);
+    $('timer').textContent = mmss(rec.elapsed);
+    $('timerNote').textContent = ' recorded';
+    $('timer').classList.remove('low');
+    $('barFill').style.width = '100%';
+
+    var note = (rec.stopReason === 'timeout')
+      ? 'Time’s up — the recording stopped automatically at ' + mmss(assignment.max_seconds) + '. '
+      : '';
+    $('recMeta').textContent = note + 'Recorded ' + mmss(rec.elapsed) + ' · ' +
+      humanBytes(blob.size) + ' · ' + type.split(';')[0] +
+      '. Watch it back below, then submit.';
+
+    refreshSubmit();
+  }
+
+  function resetRecorder() {
+    clearCurrent();
+    show($('playback'), false);
+    show($('btnRedo'), false);
+    show($('recStatusWrap'), false);
+    $('barFill').style.width = '0%';
+    $('timer').classList.remove('low');
+    setNotice($('recError'), '');
+    $('recMeta').textContent = '';
+    $('btnCamera').disabled = false;
+    $('btnCamera').textContent = 'Start camera';
+    show($('btnCamera'), true);
+    show($('btnRecord'), false);
+    refreshSubmit();
+  }
+
+  function releaseCamera() {
+    if (rec.stream) {
+      rec.stream.getTracks().forEach(function (t) { try { t.stop(); } catch (e) {} });
+      rec.stream = null;
+    }
+    var v = $('preview');
+    if (v.srcObject) v.srcObject = null;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * File picker
+   * ------------------------------------------------------------------ */
+
+  function setupFilePicker() {
+    $('file').addEventListener('change', function () {
+      setNotice($('fileError'), '');
+      show($('filePlayback'), false);
+      clearCurrent();
+
+      var f = this.files && this.files[0];
+      if (!f) { refreshSubmit(); return; }
+
+      var limit = assignment.max_mb * 1024 * 1024;
+      if (f.size > limit) {
+        setNotice($('fileError'),
+          '"' + f.name + '" is ' + humanBytes(f.size) + '. The limit for this assignment is ' +
+          assignment.max_mb + ' MB. Please pick a smaller file or export it at a lower quality.');
+        this.value = '';
+        refreshSubmit();
+        return;
+      }
+      if (f.type && f.type.indexOf('video/') !== 0) {
+        setNotice($('fileError'),
+          '"' + f.name + '" does not look like a video file. Choose an MP4, MOV or WebM.');
+        this.value = '';
+        refreshSubmit();
+        return;
+      }
+
+      setCurrent(f, 'upload', f.type || 'video/mp4', null, f.name);
+      $('fileHint').textContent = f.name + ' · ' + humanBytes(f.size);
+
+      var pb = $('filePlayback');
+      pb.src = current.objectUrl;
+      show(pb, true);
+
+      refreshSubmit();
+    });
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Current video
+   * ------------------------------------------------------------------ */
+
+  function setCurrent(blob, source, mime, seconds, originalName) {
+    clearCurrent();
+    current.blob = blob;
+    current.source = source;
+    current.mime = mime;
+    current.seconds = seconds;
+    current.originalName = originalName || '';
+    current.objectUrl = URL.createObjectURL(blob);
+  }
+
+  function clearCurrent() {
+    if (current.objectUrl) {
+      try { URL.revokeObjectURL(current.objectUrl); } catch (e) {}
+    }
+    current.blob = null;
+    current.source = '';
+    current.mime = '';
+    current.seconds = null;
+    current.originalName = '';
+    current.objectUrl = null;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Validation + submit
+   * ------------------------------------------------------------------ */
+
+  function validate() {
+    var problems = [];
+    if (!$('period').value) problems.push('Choose your period.');
+    var s = selectedStudent();
+    if (!s) problems.push('Choose your name.');
+    var email = $('email').value.trim();
+    if (s && !email) problems.push('Enter your email.');
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) problems.push('That email does not look right.');
+    if (assignment.group_required && !$('group').value.trim()) {
+      problems.push('Enter your group name or members.');
+    }
+    if (!current.blob) {
+      problems.push(assignment.allow_record && assignment.allow_upload
+        ? 'Record a video or choose a file.'
+        : (assignment.allow_record ? 'Record a video.' : 'Choose a video file.'));
+    }
+    return problems;
+  }
+
+  function refreshSubmit() {
+    var problems = validate();
+    $('btnSubmit').disabled = problems.length > 0;
+    $('submitHint').textContent = problems.length
+      ? problems[0]
+      : 'Phase 1: this saves the video to your device. Nothing is uploaded.';
+  }
+
+  function buildMetadata() {
+    var s = selectedStudent();
+    var ext = current.source === 'upload'
+      ? ((current.originalName.split('.').pop() || extFor(current.mime)).toLowerCase())
+      : extFor(current.mime);
+    var now = new Date();
+    var filename = [
+      slug(assignment.id),
+      s.student_id,
+      slug(s.last_name) + '-' + slug(s.first_name),
+      stamp(now)
+    ].join('_') + '.' + ext;
+
+    return {
+      assignment_id:   assignment.id,
+      assignment_title: assignment.title,
+      student_id:      s.student_id,          // the key — never a name string
+      last_name:       s.last_name,
+      first_name:      s.first_name,
+      period:          $('period').value,
+      email:           $('email').value.trim(),
+      group:           assignment.group_required ? $('group').value.trim() : '',
+      source:          current.source,
+      mime:            current.mime,
+      size_bytes:      current.blob.size,
+      duration_seconds: current.seconds === null ? null : Math.round(current.seconds),
+      original_filename: current.originalName || '',
+      filename:        filename,
+      client_time:     now.toISOString()
+    };
+  }
+
+  function onSubmit(ev) {
+    ev.preventDefault();
+    setNotice($('formOk'), '');
+    var problems = validate();
+    if (problems.length) {
+      setNotice($('formError'), problems.join(' '));
+      return;
+    }
+    setNotice($('formError'), '');
+
+    var btn = $('btnSubmit');
+    btn.disabled = true;
+    btn.textContent = 'Working…';
+
+    var metadata = buildMetadata();
+
+    uploadVideo(current.blob, metadata)
+      .then(function (result) {
+        setNotice($('formOk'),
+          'Saved to your device as ' + result.filename +
+          '. Nothing was uploaded — that comes in the next version.');
+      })
+      .catch(function (err) {
+        setNotice($('formError'), 'Submission failed. ' + (err && err.message ? err.message : ''));
+      })
+      .then(function () {
+        btn.textContent = 'Submit video';
+        refreshSubmit();
+      });
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Wire up
+   * ------------------------------------------------------------------ */
+
+  $('period').addEventListener('change', fillStudents);
+  $('student').addEventListener('change', onStudentChange);
+  $('email').addEventListener('input', refreshSubmit);
+  $('group').addEventListener('input', refreshSubmit);
+  $('form').addEventListener('submit', onSubmit);
+
+  boot();
+})();
+</script>
+</body>
+</html>

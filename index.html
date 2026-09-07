@@ -77,6 +77,13 @@
   .bar{height:6px;background:var(--line);border-radius:99px;overflow:hidden;margin-top:10px}
   .bar > i{display:block;height:100%;background:var(--accent);width:0%;transition:width .2s linear}
   .bar.big{height:10px}
+  /* Upload progress is genuinely unknowable here (see uploadVideo), so the bar
+     says "working" rather than inventing a percentage. */
+  .bar.indet > i{width:35%;animation:slide 1.3s ease-in-out infinite}
+  @keyframes slide{
+    0%{transform:translateX(-110%)}
+    100%{transform:translateX(320%)}
+  }
   ul.plain{margin:8px 0 0;padding-left:20px}
   ul.plain li{margin:3px 0}
   a{color:var(--accent)}
@@ -205,7 +212,7 @@
 
       <div id="progressWrap" style="margin-top:14px" hidden>
         <div class="meta" id="progressText">Preparing…</div>
-        <div class="bar big"><i id="progressFill"></i></div>
+        <div class="bar big" id="progressBar"><i id="progressFill"></i></div>
       </div>
 
       <div id="formError" class="notice err" style="margin-top:12px" hidden></div>
@@ -306,52 +313,64 @@
   /**
    * The only function that sends a video anywhere.
    *
-   * Uses XMLHttpRequest rather than fetch purely for upload progress — a
-   * 30 MB upload on school wifi needs a moving bar or students give up.
-   * Content-Type stays text/plain so the request remains "simple" and no
-   * CORS preflight is attempted.
+   * This request MUST stay a "simple" CORS request, because Apps Script does
+   * not answer preflight OPTIONS — a preflighted POST fails before it is ever
+   * sent. That rules out three things, all of which look harmless:
+   *
+   *   - any custom request header
+   *   - a Content-Type other than text/plain, form-urlencoded or multipart
+   *   - XMLHttpRequest upload-progress listeners
+   *
+   * The last one is the trap: merely attaching xhr.upload.onprogress flips the
+   * request to preflighted. That is why this uses fetch and why the submit UI
+   * shows an honest indeterminate bar instead of a percentage. A real
+   * percentage is not obtainable here without breaking the upload.
+   *
+   * No headers are set at all: fetch defaults a string body to
+   * text/plain;charset=UTF-8, which is exactly what is wanted.
    */
-  function uploadVideo(blob, metadata, onProgress) {
+  function uploadVideo(blob, metadata) {
     return blobToBase64(blob).then(function (b64) {
-      return new Promise(function (resolve, reject) {
-        var payload = JSON.stringify({
-          assignment_id:     metadata.assignment_id,
-          student_id:        metadata.student_id,
-          period:            metadata.period,
-          group:             metadata.group,
-          email:             metadata.email,
-          source:            metadata.source,
-          mime:              metadata.mime,
-          duration_seconds:  metadata.duration_seconds,
-          original_filename: metadata.original_filename,
-          client_time:       metadata.client_time,
-          data_b64:          b64
-        });
+      var payload = JSON.stringify({
+        assignment_id:     metadata.assignment_id,
+        student_id:        metadata.student_id,
+        period:            metadata.period,
+        group:             metadata.group,
+        email:             metadata.email,
+        source:            metadata.source,
+        mime:              metadata.mime,
+        duration_seconds:  metadata.duration_seconds,
+        original_filename: metadata.original_filename,
+        client_time:       metadata.client_time,
+        data_b64:          b64
+      });
 
-        var xhr = new XMLHttpRequest();
-        xhr.open('POST', API_URL, true);
-        xhr.setRequestHeader('Content-Type', 'text/plain;charset=utf-8');
-        xhr.timeout = 15 * 60 * 1000;
-
-        if (onProgress && xhr.upload) {
-          xhr.upload.onprogress = function (ev) {
-            if (ev.lengthComputable) onProgress(ev.loaded / ev.total);
-          };
-        }
-        xhr.onload = function () {
+      return fetch(API_URL, { method: 'POST', body: payload, redirect: 'follow' })
+        .then(function (r) {
+          if (!r.ok) throw new Error('the server answered HTTP ' + r.status);
+          return r.text();
+        })
+        .then(function (text) {
           var data;
-          try { data = JSON.parse(xhr.responseText); }
-          catch (e) {
-            note(API_URL, 'POST', 'unreadable answer (HTTP ' + xhr.status + ')');
-            return reject(new Error('The server answered with something unreadable.'));
+          try {
+            data = JSON.parse(text);
+          } catch (e) {
+            note(API_URL, 'POST', 'unreadable answer');
+            throw new Error(/<html/i.test(text.slice(0, 400))
+              ? 'The server sent a web page instead of a result — the Web app may not be shared with "Anyone".'
+              : 'The server answered with something unreadable.');
           }
           note(API_URL, 'POST', data.ok ? 'ok' : (data.error || 'refused'));
-          if (data.ok) resolve(data); else reject(new Error(data.error || 'The server refused it.'));
-        };
-        xhr.onerror   = function () { reject(new Error('Could not reach the server. Check your connection and try again.')); };
-        xhr.ontimeout = function () { reject(new Error('The upload timed out. Try again on a better connection.')); };
-        xhr.send(payload);
-      });
+          if (!data.ok) throw new Error(data.error || 'The server refused it.');
+          return data;
+        })
+        .catch(function (err) {
+          if (err instanceof TypeError) {
+            note(API_URL, 'POST', 'blocked before sending (' + err.message + ')');
+            throw new Error('Could not reach the server. Check your connection and try again.');
+          }
+          throw err;
+        });
     });
   }
 
@@ -1018,19 +1037,26 @@
     btn.disabled = true;
     btn.textContent = 'Sending…';
     show($('progressWrap'), true);
-    $('progressFill').style.width = '0%';
-    $('progressText').textContent = 'Preparing your video…';
+    $('progressBar').classList.add('indet');
 
-    uploadVideo(current.blob, buildMetadata(), function (fraction) {
-      var pct = Math.round(fraction * 100);
-      $('progressFill').style.width = pct + '%';
-      $('progressText').textContent = pct < 100
-        ? 'Sending… ' + pct + '%'
-        : 'Sent. Waiting for your teacher’s Drive to confirm…';
-    })
+    // No percentage is available (a progress listener would break the upload),
+    // so show elapsed time against the known file size — enough for a student
+    // to tell "working" from "stuck".
+    var started = Date.now();
+    var size = humanBytes(current.blob.size);
+    var ticker = setInterval(paint, 1000);
+    function paint() {
+      var secs = Math.round((Date.now() - started) / 1000);
+      $('progressText').textContent = 'Sending ' + size + '… ' + secs + 's' +
+        (secs > 25 ? ' — large videos can take a few minutes on school wifi.' : '');
+    }
+    paint();
+    function stopTicker() { clearInterval(ticker); show($('progressWrap'), false); }
+
+    uploadVideo(current.blob, buildMetadata())
       .then(function (result) {
         submitted = true;
-        show($('progressWrap'), false);
+        stopTicker();
         setNotice($('formOk'),
           'Submitted. Your teacher has it as ' + result.filename +
           (result.size_mb ? ' (' + result.size_mb + ' MB)' : '') + '.');
@@ -1044,7 +1070,7 @@
         ['btnCamera', 'btnRecord', 'btnRedo'].forEach(function (id) { show($(id), false); });
       })
       .catch(function (err) {
-        show($('progressWrap'), false);
+        stopTicker();
         setNotice($('formError'), (err && err.message ? err.message : 'Submission failed.') +
           ' Your video is still here — press Submit to try again, or use “Save a copy” to keep it.');
         btn.textContent = 'Submit video';

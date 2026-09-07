@@ -48,8 +48,6 @@
   input[readonly]{background:var(--bg);color:var(--muted)}
   .field{margin-bottom:14px}
   .field:last-child{margin-bottom:0}
-  .row{display:flex;gap:10px;flex-wrap:wrap}
-  .row > *{flex:1 1 200px}
   button{
     font:inherit;font-weight:600;padding:10px 16px;border-radius:8px;
     border:1px solid var(--line); background:var(--card); color:var(--ink); cursor:pointer;
@@ -68,10 +66,7 @@
   .notice.warn{background:var(--warn-bg);border-color:var(--warn-line);color:var(--warn-ink)}
   .notice.ok{background:var(--ok-bg);border-color:var(--ok);color:var(--ok)}
   .meta{color:var(--muted);font-size:.85rem}
-  .timer{
-    font-variant-numeric:tabular-nums; font-weight:700; font-size:1.5rem;
-    letter-spacing:.02em;
-  }
+  .timer{font-variant-numeric:tabular-nums;font-weight:700;font-size:1.5rem;letter-spacing:.02em}
   .timer.low{color:var(--danger)}
   .rec-dot{
     display:inline-block;width:10px;height:10px;border-radius:50%;
@@ -81,6 +76,7 @@
   @keyframes blink{to{visibility:hidden}}
   .bar{height:6px;background:var(--line);border-radius:99px;overflow:hidden;margin-top:10px}
   .bar > i{display:block;height:100%;background:var(--accent);width:0%;transition:width .2s linear}
+  .bar.big{height:10px}
   ul.plain{margin:8px 0 0;padding-left:20px}
   ul.plain li{margin:3px 0}
   a{color:var(--accent)}
@@ -97,10 +93,9 @@
   }
   details{margin-top:12px}
   summary{cursor:pointer;font-size:.85rem;font-weight:600;color:var(--muted)}
-  .attempts{margin-top:10px}
   .attempt{
     border:1px solid var(--line);border-radius:8px;padding:10px 12px;
-    margin-bottom:8px;font-size:.82rem;
+    margin-top:8px;font-size:.82rem;
   }
   .attempt a{display:inline-block;margin-top:6px;word-break:break-all}
   [hidden]{display:none !important}
@@ -113,7 +108,7 @@
 
   <header class="page">
     <h1 id="title">Loading assignment…</h1>
-    <p class="sub" id="subtitle">Reading the roster and assignment list.</p>
+    <p class="sub" id="subtitle">Contacting the class server.</p>
   </header>
 
   <div id="boot" class="card skeleton">Loading…</div>
@@ -167,9 +162,7 @@
 
     <section class="card" id="recordCard" hidden>
       <h2>Record <span class="tag" id="limitTag"></span></h2>
-
       <div id="recUnsupported" class="notice warn" hidden></div>
-
       <div id="recUI">
         <video id="preview" playsinline muted autoplay hidden></video>
         <video id="playback" playsinline controls hidden></video>
@@ -206,15 +199,22 @@
       <h2>Submit</h2>
       <div class="btnrow">
         <button type="submit" id="btnSubmit" class="primary" disabled>Submit video</button>
-        <span class="meta" id="submitHint">Nothing is sent anywhere yet.</span>
+        <button type="button" id="btnSaveCopy" hidden>Save a copy</button>
+        <span class="meta" id="submitHint"></span>
       </div>
+
+      <div id="progressWrap" style="margin-top:14px" hidden>
+        <div class="meta" id="progressText">Preparing…</div>
+        <div class="bar big"><i id="progressFill"></i></div>
+      </div>
+
       <div id="formError" class="notice err" style="margin-top:12px" hidden></div>
       <div id="formOk" class="notice ok" style="margin-top:12px" hidden></div>
     </section>
 
   </form>
 
-  <footer class="page">Phase 1 — local only. No video leaves this device.</footer>
+  <footer class="page">Your video goes to your teacher's Google Drive. Nothing else is shared.</footer>
 </div>
 
 <script>
@@ -222,255 +222,190 @@
   'use strict';
 
   /* ------------------------------------------------------------------ *
-   * Config
+   * Config — the ONE thing you must fill in.
+   *
+   * Paste the Apps Script Web app URL here. It ends in /exec.
    * ------------------------------------------------------------------ */
 
-  var SHEET_ID   = '1S6KCdUa7EgeCktuRIA_-T6S1cmqZWstsX5NwU5-DiJU';
-  var GID_ROSTER = '968816023';
-  var GID_ASSIGN = '1006326252';
+  var API_URL = 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE';
 
   var $ = function (id) { return document.getElementById(id); };
 
   /* ------------------------------------------------------------------ *
-   * gviz loading
+   * THE SUBMISSION SEAM
    *
-   * The response is JSON wrapped in a JS callback. Two paths:
-   *   1. fetch + strip the wrapper (works when CORS headers are present)
-   *   2. JSONP via <script> using tqx=...;responseHandler:cb  (no CORS needed)
+   * All network code lives between here and the end of this block.
+   * Nothing else in the file knows how submission works.
    * ------------------------------------------------------------------ */
 
-  // Every attempt is recorded so the error screen can show exactly what was
-  // tried and what came back. Guessing at this from a screenshot is hopeless.
   var attempts = [];
   function note(url, how, outcome) { attempts.push({ url: url, how: how, outcome: outcome }); }
 
-  function gvizUrl(gid, handler) {
-    // tqx is deliberately NOT percent-encoded. ':' and ';' are legal in a query
-    // string, and gviz does not recognise them escaped — an encoded tqx is
-    // silently ignored, which takes responseHandler (and the JSONP path) with it.
-    var tqx = 'out:json' + (handler ? ';responseHandler:' + handler : '');
-    return 'https://docs.google.com/spreadsheets/d/' + SHEET_ID +
-           '/gviz/tq?tqx=' + tqx + '&gid=' + encodeURIComponent(gid);
+  function apiUrl(params) {
+    var q = [];
+    for (var k in params) {
+      if (params.hasOwnProperty(k) && params[k] !== '' && params[k] !== undefined) {
+        q.push(encodeURIComponent(k) + '=' + encodeURIComponent(params[k]));
+      }
+    }
+    return API_URL + (API_URL.indexOf('?') > -1 ? '&' : '?') + q.join('&');
   }
 
-  function stripWrapper(text) {
-    // Typical shape: /*O_o*/\ngoogle.visualization.Query.setResponse({...});
-    var start = text.indexOf('{');
-    var end   = text.lastIndexOf('}');
-    if (start === -1 || end === -1 || end < start) {
-      throw new Error('Unrecognized gviz response');
-    }
-    return JSON.parse(text.slice(start, end + 1));
-  }
-
-  function fetchGviz(gid) {
-    var url = gvizUrl(gid);
-    if (typeof fetch !== 'function') {
-      note(url, 'fetch', 'this browser has no fetch()');
-      return Promise.reject(new Error('no fetch'));
-    }
-    return fetch(url, { credentials: 'omit', cache: 'no-store' })
+  // GET. No custom headers: anything else triggers a CORS preflight, and
+  // Apps Script does not answer preflights.
+  function apiGet(params) {
+    var url = apiUrl(params);
+    return fetch(url, { method: 'GET', redirect: 'follow' })
       .then(function (r) {
         if (!r.ok) throw new Error('the server answered HTTP ' + r.status);
         return r.text();
       })
       .then(function (text) {
-        // A login page means the sheet is not readable without signing in.
-        if (/<html/i.test(text.slice(0, 400))) {
-          throw new Error('got an HTML page instead of data — the sheet is probably not shared publicly');
+        var data;
+        try {
+          data = JSON.parse(text);
+        } catch (e) {
+          throw new Error(/<html/i.test(text.slice(0, 400))
+            ? 'got a web page instead of data — the Web app is probably not shared with "Anyone"'
+            : 'the answer was not readable');
         }
-        var parsed = stripWrapper(text);
-        note(url, 'fetch', 'ok');
-        return parsed;
+        note(url, 'GET ' + params.action, data.ok ? 'ok' : (data.error || 'refused'));
+        if (!data.ok) { var err = new Error(data.error || 'Refused.'); err.data = data; throw err; }
+        return data;
       })
       .catch(function (err) {
-        var why = (err && err.message) || String(err);
-        if (err instanceof TypeError) why = 'blocked by the browser (CORS or no network) — ' + why;
-        note(url, 'fetch', why);
+        if (!err.data) {
+          var why = (err && err.message) || String(err);
+          if (err instanceof TypeError) why = 'could not reach the server (blocked, offline, or bad URL)';
+          note(url, 'GET ' + params.action, why);
+        }
         throw err;
       });
   }
 
-  var jsonpSeq = 0;
-  function jsonpGviz(gid) {
+  function blobToBase64(blob) {
     return new Promise(function (resolve, reject) {
-      var name = '__gvizcb' + (Date.now().toString(36)) + (jsonpSeq++);
-      var script = document.createElement('script');
-      var timer;
-      var settled = false;
-
-      function cleanup() {
-        try { delete window[name]; } catch (e) { window[name] = undefined; }
-        if (script.parentNode) script.parentNode.removeChild(script);
-        clearTimeout(timer);
-      }
-      var url = gvizUrl(gid, name);
-
-      function done(err, payload) {
-        if (settled) return;
-        settled = true; cleanup();
-        note(url, 'script tag', err ? err.message : 'ok');
-        if (err) reject(err); else resolve(payload);
-      }
-
-      window[name] = function (payload) { done(null, payload); };
-
-      // A network-level failure (blocked, 4xx, 5xx, DNS) fires error on the element.
-      script.onerror = function () {
-        done(new Error('the request itself failed — blocked, or the sheet URL returned an error'));
+      var reader = new FileReader();
+      reader.onload = function () {
+        var s = String(reader.result);
+        // The header is "data:<mime>;base64," and the mime itself often
+        // contains a comma — "video/webm;codecs=vp8,opus". Splitting on the
+        // FIRST comma cuts into the codec list and silently corrupts the file,
+        // so anchor on the base64 marker instead.
+        var marker = ';base64,';
+        var at = s.indexOf(marker);
+        if (at > -1) return resolve(s.slice(at + marker.length));
+        var comma = s.indexOf(',');
+        resolve(comma > -1 ? s.slice(comma + 1) : s);
       };
-      // The script loaded but never called our handler: it answered with
-      // something other than the JSONP we asked for.
-      script.onload = function () {
-        setTimeout(function () {
-          done(new Error('the sheet answered, but not in the format requested (responseHandler ignored)'));
-        }, 0);
-      };
-      timer = setTimeout(function () {
-        done(new Error('timed out after 15s with no answer'));
-      }, 15000);
-
-      script.src = url;
-      document.head.appendChild(script);
+      reader.onerror = function () { reject(new Error('Could not read the video for sending.')); };
+      reader.readAsDataURL(blob);
     });
   }
 
-  function loadSheet(gid) {
-    return fetchGviz(gid).catch(function () { return jsonpGviz(gid); });
+  /**
+   * The only function that sends a video anywhere.
+   *
+   * Uses XMLHttpRequest rather than fetch purely for upload progress — a
+   * 30 MB upload on school wifi needs a moving bar or students give up.
+   * Content-Type stays text/plain so the request remains "simple" and no
+   * CORS preflight is attempted.
+   */
+  function uploadVideo(blob, metadata, onProgress) {
+    return blobToBase64(blob).then(function (b64) {
+      return new Promise(function (resolve, reject) {
+        var payload = JSON.stringify({
+          assignment_id:     metadata.assignment_id,
+          student_id:        metadata.student_id,
+          period:            metadata.period,
+          group:             metadata.group,
+          email:             metadata.email,
+          source:            metadata.source,
+          mime:              metadata.mime,
+          duration_seconds:  metadata.duration_seconds,
+          original_filename: metadata.original_filename,
+          client_time:       metadata.client_time,
+          data_b64:          b64
+        });
+
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', API_URL, true);
+        xhr.setRequestHeader('Content-Type', 'text/plain;charset=utf-8');
+        xhr.timeout = 15 * 60 * 1000;
+
+        if (onProgress && xhr.upload) {
+          xhr.upload.onprogress = function (ev) {
+            if (ev.lengthComputable) onProgress(ev.loaded / ev.total);
+          };
+        }
+        xhr.onload = function () {
+          var data;
+          try { data = JSON.parse(xhr.responseText); }
+          catch (e) {
+            note(API_URL, 'POST', 'unreadable answer (HTTP ' + xhr.status + ')');
+            return reject(new Error('The server answered with something unreadable.'));
+          }
+          note(API_URL, 'POST', data.ok ? 'ok' : (data.error || 'refused'));
+          if (data.ok) resolve(data); else reject(new Error(data.error || 'The server refused it.'));
+        };
+        xhr.onerror   = function () { reject(new Error('Could not reach the server. Check your connection and try again.')); };
+        xhr.ontimeout = function () { reject(new Error('The upload timed out. Try again on a better connection.')); };
+        xhr.send(payload);
+      });
+    });
   }
 
   /* ------------------------------------------------------------------ *
-   * Table helpers — everything trimmed on read
-   * ------------------------------------------------------------------ */
-
-  function cellText(cell) {
-    if (cell === null || cell === undefined) return '';
-    // Prefer the formatted value: numeric columns arrive as {v:1.0, f:"1"}.
-    if (cell.f !== null && cell.f !== undefined && cell.f !== '') return String(cell.f).trim();
-    if (cell.v === null || cell.v === undefined) return '';
-    return String(cell.v).trim();
-  }
-
-  function normKey(s) {
-    return String(s || '').trim().toLowerCase().replace(/\s+/g, '_');
-  }
-
-  // Turn a gviz payload into an array of plain objects keyed by column label.
-  function toRecords(payload) {
-    if (!payload || !payload.table) throw new Error('Empty sheet response');
-    var cols = payload.table.cols || [];
-    var rows = payload.table.rows || [];
-    var names = cols.map(function (c, i) {
-      return normKey(c && (c.label || c.id)) || ('col' + i);
-    });
-    return rows.map(function (row) {
-      var cells = (row && row.c) || [];
-      var obj = {};
-      for (var i = 0; i < names.length; i++) obj[names[i]] = cellText(cells[i]);
-      return obj;
-    }).filter(function (obj) {
-      // Drop fully blank rows.
-      return Object.keys(obj).some(function (k) { return obj[k] !== ''; });
-    });
-  }
-
-  function isTrue(v) {
-    var s = String(v || '').trim().toLowerCase();
-    return s === 'true' || s === 'yes' || s === 'y' || s === '1';
-  }
-
-  function toNumber(v, fallback) {
-    var n = parseFloat(String(v || '').replace(/[^0-9.\-]/g, ''));
-    return isFinite(n) ? n : fallback;
-  }
-
-  /* ------------------------------------------------------------------ *
-   * Misc utilities
+   * Utilities
    * ------------------------------------------------------------------ */
 
   function qs(name) {
     var m = new RegExp('[?&]' + name + '=([^&#]*)').exec(window.location.search);
     return m ? decodeURIComponent(m[1].replace(/\+/g, ' ')).trim() : '';
   }
-
-  function mmss(totalSeconds) {
-    var s = Math.max(0, Math.round(totalSeconds));
-    var m = Math.floor(s / 60);
-    return m + ':' + String(s % 60).padStart(2, '0');
+  function mmss(total) {
+    var s = Math.max(0, Math.round(total));
+    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
   }
-
   function humanBytes(n) {
     if (n < 1024) return n + ' B';
     if (n < 1024 * 1024) return (n / 1024).toFixed(0) + ' KB';
     return (n / (1024 * 1024)).toFixed(1) + ' MB';
   }
-
   function slug(s) {
-    return String(s || '')
-      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')  // strip diacritics
-      .replace(/[^A-Za-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '') || 'x';
+    return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'x';
   }
-
   function stamp(d) {
     var p = function (n) { return String(n).padStart(2, '0'); };
     return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' +
            p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
   }
-
   function show(el, on) { el.hidden = !on; }
-
   function setNotice(el, msg) {
     if (!msg) { el.hidden = true; el.textContent = ''; return; }
-    el.textContent = msg;
-    el.hidden = false;
+    el.textContent = msg; el.hidden = false;
   }
-
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
   var collator = (function () {
     try { return new Intl.Collator(undefined, { sensitivity: 'base', numeric: true }); }
     catch (e) { return { compare: function (a, b) { return a < b ? -1 : a > b ? 1 : 0; } }; }
   })();
 
   /* ------------------------------------------------------------------ *
-   * THE SUBMISSION SEAM
-   *
-   * Everything that could ever touch the network lives in here.
-   * Phase 1: trigger a local download. Phase 2: POST to Apps Script.
-   * No other code in this file knows how submission works.
+   * State
    * ------------------------------------------------------------------ */
 
-  function uploadVideo(blob, metadata) {
-    return new Promise(function (resolve) {
-      var url = URL.createObjectURL(blob);
-      var a = document.createElement('a');
-      a.href = url;
-      a.download = metadata.filename;
-      a.rel = 'noopener';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
-
-      // Handy while building Phase 2: the exact payload that will be posted.
-      try { console.log('[uploadVideo] metadata', metadata); } catch (e) {}
-
-      resolve({ ok: true, mode: 'local-download', filename: metadata.filename });
-    });
-  }
-
-  /* ------------------------------------------------------------------ *
-   * App state
-   * ------------------------------------------------------------------ */
-
-  var assignment = null;   // matched assignment record
-  var roster = [];         // [{student_id, last_name, first_name, period, email, active}]
-  var periodsAllowed = []; // strings
+  var assignment = null;
+  var periodsAllowed = [];
+  var studentsInPeriod = [];
+  var submitted = false;
   var current = {
-    blob: null,
-    source: '',            // 'record' | 'upload'
-    mime: '',
-    seconds: null,         // measured by our own timer; null for uploads
-    objectUrl: null
+    blob: null, source: '', mime: '', seconds: null, originalName: '', objectUrl: null
   };
 
   /* ------------------------------------------------------------------ *
@@ -479,38 +414,36 @@
 
   function fatal(msg) {
     $('boot').hidden = true;
-    $('title').textContent = 'Could not load the class data';
+    $('title').textContent = 'Could not load this assignment';
     $('subtitle').textContent = '';
     setNotice($('fatalMsg'), msg);
 
     var html = '';
-
-    if (location.protocol === 'file:') {
-      html += '<div class="notice warn" style="margin-bottom:12px">' +
-              '<strong>This page was opened straight from a file.</strong> ' +
-              'The address bar starts with <code>file://</code>. In that mode the browser blocks ' +
-              'both the spreadsheet request and the camera. Open it through a web address instead — ' +
-              'your GitHub Pages URL.</div>';
+    if (API_URL.indexOf('PASTE_') === 0) {
+      html += '<div class="notice warn" style="margin-bottom:12px"><strong>This page has not been set up yet.</strong> ' +
+              'The Apps Script Web app address is still the placeholder. Open <code>index.html</code>, ' +
+              'find <code>API_URL</code> near the top of the script, and paste the deployment URL there.</div>';
     }
-
-    html += '<p class="meta" style="margin-top:0">Two things to check:</p>' +
-            '<ul class="plain meta">' +
-            '<li>The spreadsheet is shared as <strong>Anyone with the link → Viewer</strong>.</li>' +
-            '<li>The sheet id and the two tab <code>gid</code> numbers at the top of this file still match the spreadsheet.</li>' +
-            '</ul>';
+    if (location.protocol === 'file:') {
+      html += '<div class="notice warn" style="margin-bottom:12px"><strong>This page was opened straight from a file.</strong> ' +
+              'In <code>file://</code> mode the browser blocks both the server request and the camera. ' +
+              'Open it through your GitHub Pages address instead.</div>';
+    }
+    html += '<p class="meta" style="margin-top:0">Things to check:</p><ul class="plain meta">' +
+            '<li>The Apps Script is deployed as a <strong>Web app</strong>, with <strong>Who has access: Anyone</strong>.</li>' +
+            '<li>After editing the script you deployed a <strong>new version</strong> — edits do not go live on their own.</li>' +
+            '<li>The URL in <code>API_URL</code> ends in <code>/exec</code>, not <code>/dev</code>.</li></ul>';
 
     if (attempts.length) {
-      html += '<details style="margin-top:14px"><summary>What was tried (' + attempts.length + ')</summary><div class="attempts">';
+      html += '<details><summary>What was tried (' + attempts.length + ')</summary>';
       attempts.forEach(function (a) {
-        html += '<div class="attempt">' +
-                '<div><strong>' + escapeHtml(a.how) + '</strong> — ' + escapeHtml(a.outcome) + '</div>' +
-                '<a href="' + escapeHtml(a.url) + '" target="_blank" rel="noopener">open this URL in a new tab</a>' +
-                '</div>';
+        html += '<div class="attempt"><div><strong>' + escapeHtml(a.how) + '</strong> — ' +
+                escapeHtml(a.outcome) + '</div>' +
+                '<a href="' + escapeHtml(a.url) + '" target="_blank" rel="noopener">open this URL in a new tab</a></div>';
       });
-      html += '</div><p class="meta">Opening one of those links shows what Google actually replies. ' +
-              'Data means the sheet is fine and the problem is in the page; a sign-in page means it is not shared.</p></details>';
+      html += '<p class="meta">Opening one shows what the server actually replies. JSON means the script is fine ' +
+              'and the problem is in the page; a Google sign-in page means the Web app is not shared with "Anyone".</p></details>';
     }
-
     $('fatalExtra').innerHTML = html;
     $('fatal').hidden = false;
   }
@@ -518,78 +451,39 @@
   function boot() {
     var wanted = qs('a');
 
-    Promise.all([loadSheet(GID_ROSTER), loadSheet(GID_ASSIGN)])
-      .then(function (payloads) {
-        var rosterRows = toRecords(payloads[0]);
-        var assignRows = toRecords(payloads[1]);
+    if (!wanted) {
+      apiGet({ action: 'list' })
+        .then(function (d) { showPicker(d.assignments, 'No assignment was specified in the link.'); })
+        .catch(function (e) { fatal('Could not reach the class server. ' + (e.message || '')); });
+      return;
+    }
 
-        roster = rosterRows
-          .map(function (r) {
-            return {
-              student_id: r.student_id,
-              last_name:  r.last_name,
-              first_name: r.first_name,
-              period:     r.period,
-              email:      r.email,
-              active:     isTrue(r.active)
-            };
-          })
-          .filter(function (r) { return r.student_id && r.period; });
-
-        if (!wanted) {
-          return listAssignments(assignRows, 'No assignment was specified in the link.');
-        }
-
-        var match = null;
-        for (var i = 0; i < assignRows.length; i++) {
-          if (assignRows[i].assignment_id &&
-              assignRows[i].assignment_id.toLowerCase() === wanted.toLowerCase()) {
-            match = assignRows[i];
-            break;
-          }
-        }
-        if (!match) {
-          return listAssignments(assignRows, 'No assignment matches "' + wanted + '".');
-        }
-
-        assignment = {
-          id:             match.assignment_id,
-          title:          match.title || match.assignment_id,
-          periods:        match.periods,
-          status:         String(match.status || '').toLowerCase(),
-          group_required: isTrue(match.group_required),
-          due_date:       match.due_date,
-          allow_record:   isTrue(match.allow_record),
-          allow_upload:   isTrue(match.allow_upload),
-          max_seconds:    toNumber(match.max_seconds, 120),
-          max_mb:         toNumber(match.max_mb, 40),
-          instructions:   match.instructions
-        };
-
+    apiGet({ action: 'config', a: wanted })
+      .then(function (d) {
+        assignment = d.assignment;
+        periodsAllowed = d.periods || [];
         render();
       })
       .catch(function (err) {
-        fatal('The roster and assignment list could not be read from the spreadsheet.' +
-              (err && err.message ? ' Last error: ' + err.message + '.' : ''));
+        if (err.data && err.data.assignments) {
+          showPicker(err.data.assignments, err.message);
+        } else {
+          fatal('Could not reach the class server. ' + (err.message || ''));
+        }
       });
   }
 
-  function listAssignments(assignRows, why) {
+  function showPicker(list, why) {
     $('boot').hidden = true;
     $('title').textContent = 'Pick an assignment';
-    $('subtitle').textContent = why;
-
-    var open = assignRows.filter(function (r) {
-      return String(r.status || '').toLowerCase() !== 'closed' && r.assignment_id;
-    });
+    $('subtitle').textContent = why || '';
     var html = '<h2>Open assignments</h2>';
-    if (!open.length) {
+    if (!list || !list.length) {
       html += '<p class="meta">There are no open assignments right now.</p>';
     } else {
-      html += '<ul class="plain">' + open.map(function (r) {
-        var href = window.location.pathname + '?a=' + encodeURIComponent(r.assignment_id);
-        return '<li><a href="' + href + '">' + escapeHtml(r.title || r.assignment_id) + '</a>' +
-               ' <span class="meta">' + escapeHtml(r.assignment_id) + '</span></li>';
+      html += '<ul class="plain">' + list.map(function (a) {
+        return '<li><a href="' + location.pathname + '?a=' + encodeURIComponent(a.id) + '">' +
+               escapeHtml(a.title) + '</a> <span class="meta">' + escapeHtml(a.id) + '</span></li>';
       }).join('') + '</ul>';
     }
     var card = document.createElement('section');
@@ -598,63 +492,32 @@
     $('fatal').parentNode.insertBefore(card, $('fatal'));
   }
 
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, function (c) {
-      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
-    });
-  }
-
   /* ------------------------------------------------------------------ *
-   * Render from the assignment row
+   * Render
    * ------------------------------------------------------------------ */
 
   function render() {
     $('boot').hidden = true;
     $('title').textContent = assignment.title;
     $('subtitle').textContent = assignment.id;
-
     $('instructions').textContent = assignment.instructions || '';
     $('dueLine').textContent = assignment.due_date ? 'Due ' + assignment.due_date : '';
     show($('instructionsCard'), true);
 
-    if (assignment.status === 'closed') {
-      show($('closedCard'), true);
-      return;                     // no form at all
-    }
+    if (assignment.status === 'closed') { show($('closedCard'), true); return; }
 
     show($('form'), true);
-
-    // ---- periods -----------------------------------------------------
-    var rosterPeriods = uniqueSorted(roster.map(function (r) { return r.period; }));
-    var spec = String(assignment.periods || '').trim().toLowerCase();
-    if (spec === '' || spec === 'all' || spec === '*') {
-      periodsAllowed = rosterPeriods;
-    } else {
-      var wanted = {};
-      String(assignment.periods).split(/[,;/|]/).forEach(function (p) {
-        p = p.trim();
-        if (p) wanted[p.toLowerCase()] = true;
-      });
-      periodsAllowed = rosterPeriods.filter(function (p) { return wanted[p.toLowerCase()]; });
-    }
 
     var sel = $('period');
     sel.innerHTML = '<option value="">Select a period…</option>';
     periodsAllowed.forEach(function (p) {
       var o = document.createElement('option');
-      o.value = p;
-      o.textContent = 'Period ' + p;
+      o.value = p; o.textContent = 'Period ' + p;
       sel.appendChild(o);
     });
-    if (periodsAllowed.length === 1) {
-      sel.value = periodsAllowed[0];
-      fillStudents();
-    }
+    if (periodsAllowed.length === 1) { sel.value = periodsAllowed[0]; fillStudents(); }
 
-    // ---- group -------------------------------------------------------
     show($('groupField'), assignment.group_required);
-
-    // ---- capture options --------------------------------------------
     show($('recordCard'), assignment.allow_record);
     show($('uploadCard'), assignment.allow_upload);
 
@@ -662,39 +525,32 @@
     $('sizeTag').textContent = 'max ' + assignment.max_mb + ' MB';
     $('fileHint').textContent = 'Video files only, up to ' + assignment.max_mb + ' MB.';
 
-    if (assignment.allow_record) setupRecorder();
-    if (assignment.allow_upload) setupFilePicker();
-
-    if (!assignment.allow_record && !assignment.allow_upload) {
-      setNotice($('formError'),
-        'This assignment has neither recording nor file upload enabled. Ask your teacher to fix the assignment settings.');
+    // The sheet may ask for more than the transport can carry; say so plainly
+    // rather than letting a student discover it at the end of an upload.
+    if (assignment.sheet_max_mb && assignment.sheet_max_mb > assignment.max_mb) {
+      var warn = document.createElement('div');
+      warn.className = 'notice warn';
+      warn.style.marginTop = '10px';
+      warn.textContent = 'This assignment asks for up to ' + assignment.sheet_max_mb +
+        ' MB, but the submission system can only accept ' + assignment.max_mb +
+        ' MB. Export your video smaller, or ask your teacher.';
+      $('uploadCard').appendChild(warn);
     }
 
+    if (assignment.allow_record) setupRecorder();
+    if (assignment.allow_upload) setupFilePicker();
     refreshSubmit();
   }
 
-  function uniqueSorted(values) {
-    var seen = {}, out = [];
-    values.forEach(function (v) {
-      if (v !== '' && !seen[v]) { seen[v] = true; out.push(v); }
-    });
-    out.sort(function (a, b) {
-      var na = parseFloat(a), nb = parseFloat(b);
-      if (isFinite(na) && isFinite(nb) && na !== nb) return na - nb;
-      return collator.compare(a, b);
-    });
-    return out;
-  }
-
   /* ------------------------------------------------------------------ *
-   * Roster dropdowns
+   * Roster
    * ------------------------------------------------------------------ */
 
   function fillStudents() {
     var period = $('period').value;
     var sel = $('student');
-    sel.innerHTML = '';
     hideEmail();
+    studentsInPeriod = [];
 
     if (!period) {
       sel.disabled = true;
@@ -703,68 +559,56 @@
       return;
     }
 
-    var list = roster.filter(function (r) {
-      return r.period === period && r.active;
-    });
+    sel.disabled = true;
+    sel.innerHTML = '<option value="">Loading…</option>';
+    $('studentHint').textContent = 'Loading period ' + period + '…';
 
-    // A student can legitimately appear twice under one id (two periods);
-    // within one period, keep one row per student_id.
-    var byId = {}, unique = [];
-    list.forEach(function (r) {
-      if (byId[r.student_id]) return;
-      byId[r.student_id] = true;
-      unique.push(r);
-    });
+    apiGet({ action: 'students', a: assignment.id, period: period })
+      .then(function (d) {
+        if ($('period').value !== period) return;     // they changed it again
+        studentsInPeriod = d.students || [];
 
-    unique.sort(function (a, b) {
-      return collator.compare(a.last_name, b.last_name)
-          || collator.compare(a.first_name, b.first_name)
-          || collator.compare(a.student_id, b.student_id);
-    });
+        var nameCount = {};
+        studentsInPeriod.forEach(function (s) {
+          var k = (s.last + '|' + s.first).toLowerCase();
+          nameCount[k] = (nameCount[k] || 0) + 1;
+        });
 
-    // Detect duplicate display names so we can disambiguate them.
-    var nameCount = {};
-    unique.forEach(function (r) {
-      var k = (r.last_name + '|' + r.first_name).toLowerCase();
-      nameCount[k] = (nameCount[k] || 0) + 1;
-    });
+        sel.innerHTML = '';
+        var head = document.createElement('option');
+        head.value = ''; head.textContent = 'Select your name…';
+        sel.appendChild(head);
 
-    sel.disabled = false;
-    var head = document.createElement('option');
-    head.value = '';
-    head.textContent = 'Select your name…';
-    sel.appendChild(head);
+        studentsInPeriod.forEach(function (s) {
+          var o = document.createElement('option');
+          o.value = s.id;                                  // the key is the id
+          var label = s.last + ', ' + s.first;
+          if (nameCount[(s.last + '|' + s.first).toLowerCase()] > 1) {
+            label += '  (ID ' + s.id + (s.email_mask ? ' · ' + s.email_mask : '') + ')';
+          }
+          o.textContent = label;
+          sel.appendChild(o);
+        });
 
-    unique.forEach(function (r) {
-      var o = document.createElement('option');
-      o.value = r.student_id;                     // the key is always the id
-      var label = r.last_name + ', ' + r.first_name;
-      var k = (r.last_name + '|' + r.first_name).toLowerCase();
-      if (nameCount[k] > 1) {
-        label += '  (ID ' + r.student_id;
-        if (r.email) label += ' · ' + r.email.split('@')[0];
-        label += ')';
-      }
-      o.textContent = label;
-      sel.appendChild(o);
-    });
-
-    $('studentHint').textContent = unique.length
-      ? unique.length + ' student' + (unique.length === 1 ? '' : 's') + ' in period ' + period + ', sorted by last name.'
-      : 'No active students found in period ' + period + '.';
-
-    refreshSubmit();
+        sel.disabled = false;
+        $('studentHint').textContent = studentsInPeriod.length
+          ? studentsInPeriod.length + ' student' + (studentsInPeriod.length === 1 ? '' : 's') +
+            ' in period ' + period + ', sorted by last name.'
+          : 'No active students found in period ' + period + '.';
+        refreshSubmit();
+      })
+      .catch(function (err) {
+        sel.innerHTML = '<option value="">Could not load names</option>';
+        $('studentHint').textContent = 'Could not load period ' + period + '. ' + (err.message || '');
+        refreshSubmit();
+      });
   }
 
   function selectedStudent() {
     var id = $('student').value;
-    var period = $('period').value;
     if (!id) return null;
-    for (var i = 0; i < roster.length; i++) {
-      if (roster[i].student_id === id && roster[i].period === period) return roster[i];
-    }
-    for (var j = 0; j < roster.length; j++) {
-      if (roster[j].student_id === id) return roster[j];
+    for (var i = 0; i < studentsInPeriod.length; i++) {
+      if (studentsInPeriod[i].id === id) return studentsInPeriod[i];
     }
     return null;
   }
@@ -778,16 +622,13 @@
   function onStudentChange() {
     var s = selectedStudent();
     if (!s) { hideEmail(); refreshSubmit(); return; }
-
     var box = $('email');
-    if (s.email) {
-      box.value = s.email;
-      box.readOnly = true;
-      $('emailHint').textContent = 'From the class roster.';
-    } else {
-      box.value = '';
-      box.readOnly = false;
+    if (s.needs_email) {
+      box.value = ''; box.readOnly = false;
       $('emailHint').textContent = 'We don’t have an email on file for you. Please type the one your teacher should use.';
+    } else {
+      box.value = s.email_mask; box.readOnly = true;
+      $('emailHint').textContent = 'On file with your teacher. Hidden here for privacy.';
     }
     show($('emailField'), true);
     refreshSubmit();
@@ -798,30 +639,40 @@
    * ------------------------------------------------------------------ */
 
   var MIME_CANDIDATES = [
-    'video/webm;codecs=vp9,opus',
-    'video/webm;codecs=vp8,opus',
-    'video/webm;codecs=h264,opus',
-    'video/webm',
-    'video/mp4;codecs=h264,aac',
-    'video/mp4;codecs=avc1',
-    'video/mp4',
-    'video/quicktime'
+    'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm;codecs=h264,opus',
+    'video/webm', 'video/mp4;codecs=h264,aac', 'video/mp4;codecs=avc1', 'video/mp4', 'video/quicktime'
   ];
 
   function pickMime() {
     if (typeof MediaRecorder === 'undefined') return null;
-    if (typeof MediaRecorder.isTypeSupported !== 'function') return '';  // let the browser decide
+    if (typeof MediaRecorder.isTypeSupported !== 'function') return '';
     for (var i = 0; i < MIME_CANDIDATES.length; i++) {
       if (MediaRecorder.isTypeSupported(MIME_CANDIDATES[i])) return MIME_CANDIDATES[i];
     }
     return '';
   }
 
-  // A WebM written by MediaRecorder has no duration in its header, so Chrome
-  // reports Infinity and the scrub bar is dead. Seeking far past the end forces
-  // the browser to walk the file and work the real duration out; we then rewind.
-  // This only repairs playback in the page — our own timer remains the source of
-  // truth for how long the recording actually is.
+  function extFor(mime) {
+    var m = String(mime || '').toLowerCase();
+    if (m.indexOf('quicktime') > -1) return 'mov';
+    if (m.indexOf('mp4') > -1) return 'mp4';
+    if (m.indexOf('webm') > -1) return 'webm';
+    return 'bin';
+  }
+
+  /**
+   * Pick a bitrate so that a full-length recording lands inside the size cap.
+   * Left to itself a browser will happily produce 60 MB of 1080p and the
+   * upload then fails after the student has already done the work.
+   */
+  function bitrateFor(maxSeconds, maxMb) {
+    var AUDIO = 96000;
+    var budgetBits = maxMb * 1024 * 1024 * 8 * 0.80;      // 20% headroom
+    var total = Math.floor(budgetBits / Math.max(1, maxSeconds));
+    var video = Math.max(400000, Math.min(2500000, total - AUDIO));
+    return { video: video, audio: AUDIO };
+  }
+
   function repairSeeking(video) {
     function attempt() {
       if (video.duration !== Infinity && !isNaN(video.duration)) return;
@@ -836,24 +687,7 @@
     if (video.readyState >= 1) attempt();
   }
 
-  function extFor(mime) {
-    var m = String(mime || '').toLowerCase();
-    if (m.indexOf('quicktime') > -1) return 'mov';
-    if (m.indexOf('mp4') > -1) return 'mp4';
-    if (m.indexOf('webm') > -1) return 'webm';
-    if (m.indexOf('ogg') > -1) return 'ogv';
-    return 'bin';
-  }
-
-  var rec = {
-    stream: null,
-    recorder: null,
-    chunks: [],
-    startedAt: 0,
-    elapsed: 0,
-    tick: null,
-    mime: ''
-  };
+  var rec = { stream: null, recorder: null, chunks: [], startedAt: 0, elapsed: 0, tick: null, mime: '' };
 
   function recorderSupported() {
     return !!(navigator.mediaDevices &&
@@ -872,10 +706,8 @@
       return;
     }
     if (!window.isSecureContext && location.hostname !== 'localhost') {
-      setNotice($('recUnsupported'),
-        'The camera only works over https. Open this page with an https:// address.');
+      setNotice($('recUnsupported'), 'The camera only works over https. Open this page with an https:// address.');
     }
-
     $('btnCamera').addEventListener('click', startCamera);
     $('btnRecord').addEventListener('click', startRecording);
     $('btnStop').addEventListener('click', function () { stopRecording('manual'); });
@@ -894,12 +726,9 @@
     }).then(function (stream) {
       rec.stream = stream;
       var v = $('preview');
-      v.srcObject = stream;
-      v.muted = true;                 // avoid howling feedback
+      v.srcObject = stream; v.muted = true;
       show(v, true);
-      var p = v.play();
-      if (p && p.catch) p.catch(function () {});
-
+      var p = v.play(); if (p && p.catch) p.catch(function () {});
       show($('btnCamera'), false);
       show($('btnRecord'), true);
       $('recMeta').textContent = 'Camera on. You have up to ' + mmss(assignment.max_seconds) + '.';
@@ -929,36 +758,31 @@
 
     rec.mime = pickMime();
     rec.chunks = [];
+    var rate = bitrateFor(assignment.max_seconds, assignment.max_mb);
+    var opts = { videoBitsPerSecond: rate.video, audioBitsPerSecond: rate.audio };
+    if (rec.mime) opts.mimeType = rec.mime;
 
     try {
-      rec.recorder = (rec.mime)
-        ? new MediaRecorder(rec.stream, { mimeType: rec.mime })
-        : new MediaRecorder(rec.stream);
+      rec.recorder = new MediaRecorder(rec.stream, opts);
     } catch (e) {
-      try {
-        rec.recorder = new MediaRecorder(rec.stream);   // last-ditch: browser default
-        rec.mime = '';
-      } catch (e2) {
-        setNotice($('recError'), 'Recording is not supported in this browser.');
-        return;
-      }
+      try { rec.recorder = new MediaRecorder(rec.stream); rec.mime = ''; }
+      catch (e2) { setNotice($('recError'), 'Recording is not supported in this browser.'); return; }
     }
 
     rec.recorder.ondataavailable = function (ev) {
       if (ev.data && ev.data.size > 0) rec.chunks.push(ev.data);
     };
     rec.recorder.onerror = function (ev) {
-      setNotice($('recError'), 'The recorder stopped unexpectedly. ' +
-        ((ev && ev.error && ev.error.message) || ''));
+      setNotice($('recError'), 'The recorder stopped unexpectedly. ' + ((ev && ev.error && ev.error.message) || ''));
       stopRecording('error');
     };
     rec.recorder.onstop = finishRecording;
 
-    // Our own clock is the source of truth. Blob duration metadata is
-    // frequently missing or wrong, so it is never consulted.
+    // Our own clock is the source of truth; blob duration metadata is missing
+    // or wrong far too often to rely on.
     rec.startedAt = Date.now();
     rec.elapsed = 0;
-    rec.recorder.start(1000);          // timeslice keeps Safari flushing chunks
+    rec.recorder.start(1000);
 
     show($('btnRecord'), false);
     show($('btnStop'), true);
@@ -975,7 +799,6 @@
     rec.elapsed = (Date.now() - rec.startedAt) / 1000;
     var remaining = assignment.max_seconds - rec.elapsed;
     if (remaining <= 0) {
-      remaining = 0;
       $('timer').textContent = mmss(0);
       $('barFill').style.width = '100%';
       stopRecording('timeout');
@@ -983,8 +806,7 @@
     }
     $('timer').textContent = mmss(remaining);
     $('timer').classList.toggle('low', remaining <= 10);
-    $('barFill').style.width =
-      Math.min(100, (rec.elapsed / assignment.max_seconds) * 100).toFixed(1) + '%';
+    $('barFill').style.width = Math.min(100, (rec.elapsed / assignment.max_seconds) * 100).toFixed(1) + '%';
   }
 
   function stopRecording(reason) {
@@ -993,14 +815,11 @@
     if (rec.elapsed > assignment.max_seconds) rec.elapsed = assignment.max_seconds;
     rec.stopReason = reason;
     $('recDot').classList.remove('on');
-    show($('recDot'), false);          // a red dot must never outlive the recording
+    show($('recDot'), false);
     show($('btnStop'), false);
-
     if (rec.recorder && rec.recorder.state !== 'inactive') {
       try { rec.recorder.stop(); } catch (e) { finishRecording(); }
-    } else {
-      finishRecording();
-    }
+    } else { finishRecording(); }
   }
 
   function finishRecording() {
@@ -1021,8 +840,7 @@
     setCurrent(blob, 'record', type, rec.elapsed);
 
     var pb = $('playback');
-    pb.src = current.objectUrl;
-    pb.muted = false;
+    pb.src = current.objectUrl; pb.muted = false;
     show(pb, true);
     repairSeeking(pb);
 
@@ -1030,17 +848,17 @@
     $('timer').textContent = mmss(rec.elapsed);
     $('timerNote').textContent = ' recorded of ' + mmss(assignment.max_seconds) + ' allowed';
     $('timer').classList.remove('low');
-    // The bar shows how much of the allowance was used, not a completion state.
-    $('barFill').style.width =
-      Math.min(100, (rec.elapsed / assignment.max_seconds) * 100).toFixed(1) + '%';
+    $('barFill').style.width = Math.min(100, (rec.elapsed / assignment.max_seconds) * 100).toFixed(1) + '%';
 
     var note = (rec.stopReason === 'timeout')
-      ? 'Time’s up — the recording stopped automatically at ' + mmss(assignment.max_seconds) + '. '
-      : '';
+      ? 'Time’s up — the recording stopped automatically at ' + mmss(assignment.max_seconds) + '. ' : '';
     $('recMeta').textContent = note + 'Recorded ' + mmss(rec.elapsed) + ' · ' +
-      humanBytes(blob.size) + ' · ' + type.split(';')[0] +
-      '. Watch it back below, then submit.';
+      humanBytes(blob.size) + ' · ' + type.split(';')[0] + '. Watch it back below, then submit.';
 
+    if (blob.size > assignment.max_mb * 1024 * 1024) {
+      setNotice($('recError'), 'That recording is ' + humanBytes(blob.size) +
+        ', over the ' + assignment.max_mb + ' MB limit. Record a shorter one.');
+    }
     refreshSubmit();
   }
 
@@ -1065,8 +883,7 @@
       rec.stream.getTracks().forEach(function (t) { try { t.stop(); } catch (e) {} });
       rec.stream = null;
     }
-    var v = $('preview');
-    if (v.srcObject) v.srcObject = null;
+    if ($('preview').srcObject) $('preview').srcObject = null;
   }
 
   /* ------------------------------------------------------------------ *
@@ -1082,31 +899,23 @@
       var f = this.files && this.files[0];
       if (!f) { refreshSubmit(); return; }
 
-      var limit = assignment.max_mb * 1024 * 1024;
-      if (f.size > limit) {
-        setNotice($('fileError'),
-          '"' + f.name + '" is ' + humanBytes(f.size) + '. The limit for this assignment is ' +
-          assignment.max_mb + ' MB. Please pick a smaller file or export it at a lower quality.');
-        this.value = '';
-        refreshSubmit();
-        return;
+      if (f.size > assignment.max_mb * 1024 * 1024) {
+        setNotice($('fileError'), '"' + f.name + '" is ' + humanBytes(f.size) +
+          '. The limit for this assignment is ' + assignment.max_mb +
+          ' MB. Please pick a smaller file or export it at a lower quality.');
+        this.value = ''; refreshSubmit(); return;
       }
       if (f.type && f.type.indexOf('video/') !== 0) {
-        setNotice($('fileError'),
-          '"' + f.name + '" does not look like a video file. Choose an MP4, MOV or WebM.');
-        this.value = '';
-        refreshSubmit();
-        return;
+        setNotice($('fileError'), '"' + f.name + '" does not look like a video file. Choose an MP4, MOV or WebM.');
+        this.value = ''; refreshSubmit(); return;
       }
 
       setCurrent(f, 'upload', f.type || 'video/mp4', null, f.name);
       $('fileHint').textContent = f.name + ' · ' + humanBytes(f.size);
-
       var pb = $('filePlayback');
       pb.src = current.objectUrl;
       show(pb, true);
       repairSeeking(pb);
-
       refreshSubmit();
     });
   }
@@ -1117,24 +926,36 @@
 
   function setCurrent(blob, source, mime, seconds, originalName) {
     clearCurrent();
-    current.blob = blob;
-    current.source = source;
-    current.mime = mime;
-    current.seconds = seconds;
-    current.originalName = originalName || '';
+    current.blob = blob; current.source = source; current.mime = mime;
+    current.seconds = seconds; current.originalName = originalName || '';
     current.objectUrl = URL.createObjectURL(blob);
+    show($('btnSaveCopy'), true);
   }
 
   function clearCurrent() {
-    if (current.objectUrl) {
-      try { URL.revokeObjectURL(current.objectUrl); } catch (e) {}
-    }
-    current.blob = null;
-    current.source = '';
-    current.mime = '';
-    current.seconds = null;
-    current.originalName = '';
-    current.objectUrl = null;
+    if (current.objectUrl) { try { URL.revokeObjectURL(current.objectUrl); } catch (e) {} }
+    current.blob = null; current.source = ''; current.mime = '';
+    current.seconds = null; current.originalName = ''; current.objectUrl = null;
+    show($('btnSaveCopy'), false);
+  }
+
+  function localName() {
+    var s = selectedStudent();
+    var ext = current.source === 'upload'
+      ? ((current.originalName.split('.').pop() || extFor(current.mime)).toLowerCase())
+      : extFor(current.mime);
+    return [slug(assignment.id), s ? s.id : 'video',
+            s ? slug(s.last) + '-' + slug(s.first) : '', stamp(new Date())]
+           .filter(Boolean).join('_') + '.' + ext;
+  }
+
+  // Not a network operation — a student keeping their own copy.
+  function saveCopy() {
+    if (!current.blob) return;
+    var a = document.createElement('a');
+    a.href = current.objectUrl;
+    a.download = localName();
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
   }
 
   /* ------------------------------------------------------------------ *
@@ -1146,57 +967,43 @@
     if (!$('period').value) problems.push('Choose your period.');
     var s = selectedStudent();
     if (!s) problems.push('Choose your name.');
-    var email = $('email').value.trim();
-    if (s && !email) problems.push('Enter your email.');
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) problems.push('That email does not look right.');
-    if (assignment.group_required && !$('group').value.trim()) {
-      problems.push('Enter your group name or members.');
+    if (s && s.needs_email) {
+      var email = $('email').value.trim();
+      if (!email) problems.push('Enter your email.');
+      else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) problems.push('That email does not look right.');
     }
+    if (assignment.group_required && !$('group').value.trim()) problems.push('Enter your group name or members.');
     if (!current.blob) {
       problems.push(assignment.allow_record && assignment.allow_upload
         ? 'Record a video or choose a file.'
         : (assignment.allow_record ? 'Record a video.' : 'Choose a video file.'));
+    } else if (current.blob.size > assignment.max_mb * 1024 * 1024) {
+      problems.push('That video is over the ' + assignment.max_mb + ' MB limit.');
     }
     return problems;
   }
 
   function refreshSubmit() {
+    if (submitted) return;
     var problems = validate();
     $('btnSubmit').disabled = problems.length > 0;
-    $('submitHint').textContent = problems.length
-      ? problems[0]
-      : 'Phase 1: this saves the video to your device. Nothing is uploaded.';
+    $('submitHint').textContent = problems.length ? problems[0] : 'Sends your video to your teacher.';
   }
 
   function buildMetadata() {
     var s = selectedStudent();
-    var ext = current.source === 'upload'
-      ? ((current.originalName.split('.').pop() || extFor(current.mime)).toLowerCase())
-      : extFor(current.mime);
-    var now = new Date();
-    var filename = [
-      slug(assignment.id),
-      s.student_id,
-      slug(s.last_name) + '-' + slug(s.first_name),
-      stamp(now)
-    ].join('_') + '.' + ext;
-
     return {
-      assignment_id:   assignment.id,
-      assignment_title: assignment.title,
-      student_id:      s.student_id,          // the key — never a name string
-      last_name:       s.last_name,
-      first_name:      s.first_name,
-      period:          $('period').value,
-      email:           $('email').value.trim(),
-      group:           assignment.group_required ? $('group').value.trim() : '',
-      source:          current.source,
-      mime:            current.mime,
-      size_bytes:      current.blob.size,
-      duration_seconds: current.seconds === null ? null : Math.round(current.seconds),
+      assignment_id:     assignment.id,
+      student_id:        s.id,
+      period:            $('period').value,
+      group:             assignment.group_required ? $('group').value.trim() : '',
+      // Only ever sent when the roster has no address for this student.
+      email:             s.needs_email ? $('email').value.trim() : '',
+      source:            current.source,
+      mime:              current.mime,
+      duration_seconds:  current.seconds === null ? null : Math.round(current.seconds),
       original_filename: current.originalName || '',
-      filename:        filename,
-      client_time:     now.toISOString()
+      client_time:       new Date().toISOString()
     };
   }
 
@@ -1204,28 +1011,42 @@
     ev.preventDefault();
     setNotice($('formOk'), '');
     var problems = validate();
-    if (problems.length) {
-      setNotice($('formError'), problems.join(' '));
-      return;
-    }
+    if (problems.length) { setNotice($('formError'), problems.join(' ')); return; }
     setNotice($('formError'), '');
 
     var btn = $('btnSubmit');
     btn.disabled = true;
-    btn.textContent = 'Working…';
+    btn.textContent = 'Sending…';
+    show($('progressWrap'), true);
+    $('progressFill').style.width = '0%';
+    $('progressText').textContent = 'Preparing your video…';
 
-    var metadata = buildMetadata();
-
-    uploadVideo(current.blob, metadata)
+    uploadVideo(current.blob, buildMetadata(), function (fraction) {
+      var pct = Math.round(fraction * 100);
+      $('progressFill').style.width = pct + '%';
+      $('progressText').textContent = pct < 100
+        ? 'Sending… ' + pct + '%'
+        : 'Sent. Waiting for your teacher’s Drive to confirm…';
+    })
       .then(function (result) {
+        submitted = true;
+        show($('progressWrap'), false);
         setNotice($('formOk'),
-          'Saved to your device as ' + result.filename +
-          '. Nothing was uploaded — that comes in the next version.');
+          'Submitted. Your teacher has it as ' + result.filename +
+          (result.size_mb ? ' (' + result.size_mb + ' MB)' : '') + '.');
+        btn.textContent = 'Submitted';
+        btn.disabled = true;
+        $('submitHint').textContent = 'You can close this page.';
+        // Nothing should be quietly changed after a successful submission.
+        ['period', 'student', 'email', 'group', 'file'].forEach(function (id) {
+          if ($(id)) $(id).disabled = true;
+        });
+        ['btnCamera', 'btnRecord', 'btnRedo'].forEach(function (id) { show($(id), false); });
       })
       .catch(function (err) {
-        setNotice($('formError'), 'Submission failed. ' + (err && err.message ? err.message : ''));
-      })
-      .then(function () {
+        show($('progressWrap'), false);
+        setNotice($('formError'), (err && err.message ? err.message : 'Submission failed.') +
+          ' Your video is still here — press Submit to try again, or use “Save a copy” to keep it.');
         btn.textContent = 'Submit video';
         refreshSubmit();
       });
@@ -1239,7 +1060,11 @@
   $('student').addEventListener('change', onStudentChange);
   $('email').addEventListener('input', refreshSubmit);
   $('group').addEventListener('input', refreshSubmit);
+  $('btnSaveCopy').addEventListener('click', saveCopy);
   $('form').addEventListener('submit', onSubmit);
+  window.addEventListener('beforeunload', function (e) {
+    if (current.blob && !submitted) { e.preventDefault(); e.returnValue = ''; }
+  });
 
   boot();
 })();

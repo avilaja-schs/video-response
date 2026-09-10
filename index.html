@@ -591,6 +591,22 @@
 
     if (assignment.allow_record) setupRecorder();
     if (assignment.allow_upload) setupFilePicker();
+
+    // A long time limit against a small size limit means a soft picture. Say so
+    // up front rather than letting them wonder why it looks poor.
+    if (assignment.allow_record) {
+      var rate = bitrateFor(assignment.max_seconds, assignment.max_mb);
+      if (!rate.fits) {
+        setNotice($('recUnsupported'),
+          'A full ' + mmss(assignment.max_seconds) + ' recording would be about ' +
+          rate.predictedMb.toFixed(0) + ' MB, over this assignment’s ' + assignment.max_mb +
+          ' MB limit. Keep yours shorter, or ask your teacher to raise the limit.');
+      } else if (rate.video < 500000) {
+        $('recMeta').textContent = 'This assignment allows up to ' + mmss(assignment.max_seconds) +
+          ', so the picture is recorded at lower quality to fit the ' + assignment.max_mb +
+          ' MB limit. Speech stays clear.';
+      }
+    }
     refreshSubmit();
   }
 
@@ -812,11 +828,20 @@
    * upload then fails after the student has already done the work.
    */
   function bitrateFor(maxSeconds, maxMb) {
-    var AUDIO = 96000;
     var budgetBits = maxMb * 1024 * 1024 * 8 * 0.80;      // 20% headroom
     var total = Math.floor(budgetBits / Math.max(1, maxSeconds));
-    var video = Math.max(400000, Math.min(2500000, total - AUDIO));
-    return { video: video, audio: AUDIO };
+
+    // Audio takes a smaller share when the budget is tight. Speech survives
+    // 48kbps; a rejected upload does not.
+    var audio = total < 600000 ? 48000 : 96000;
+
+    // The floor must stay below what the budget allows, or a long assignment
+    // produces a file over the cap and the student is told only after
+    // recording. At 10 minutes and 35 MB the budget is ~390kbps in total, so a
+    // 400kbps video floor overshot it by half a megabyte.
+    var video = Math.max(120000, Math.min(2500000, total - audio));
+    var predictedMb = ((video + audio) * maxSeconds / 8) / (1024 * 1024);
+    return { video: video, audio: audio, predictedMb: predictedMb, fits: predictedMb <= maxMb };
   }
 
   function repairSeeking(video) {

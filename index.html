@@ -143,24 +143,56 @@
     <section class="card">
       <h2>Who are you?</h2>
 
-      <div class="field">
-        <label for="period">Period</label>
-        <select id="period"><option value="">Select a period…</option></select>
+      <!-- Preferred: type your address. No dropdown to mis-tap. -->
+      <div id="idByEmail">
+        <div class="field">
+          <label for="lookup">Your school email</label>
+          <div class="btnrow">
+            <input type="email" id="lookup" inputmode="email" autocomplete="email"
+                   spellcheck="false" style="flex:1 1 220px" placeholder="you@school.org">
+            <button type="button" id="btnFind">Find me</button>
+          </div>
+          <p class="hint" id="lookupHint">We use this to put your name on the video.</p>
+        </div>
+        <div id="lookupError" class="notice err" hidden></div>
+        <div id="identified" class="notice ok" hidden></div>
+
+        <div class="field" id="whichPeriodField" hidden>
+          <label for="whichPeriod">Which period is this for?</label>
+          <select id="whichPeriod"></select>
+          <p class="hint">You are in more than one of this assignment's periods.</p>
+        </div>
+
+        <p class="hint" style="margin-top:12px">
+          <a href="#" id="toList">I don't have a school email — pick my name from a list</a>
+        </p>
       </div>
 
-      <div class="field">
-        <label for="student">Name</label>
-        <select id="student" disabled><option value="">Select your period first…</option></select>
-        <p class="hint" id="studentHint">Sorted by last name. If two students share a name, the student ID tells them apart.</p>
+      <!-- Fallback for students with no address on file. -->
+      <div id="idByList" hidden>
+        <div class="field">
+          <label for="period">Period</label>
+          <select id="period"><option value="">Select a period…</option></select>
+        </div>
+
+        <div class="field">
+          <label for="student">Name</label>
+          <select id="student" disabled><option value="">Select your period first…</option></select>
+          <p class="hint" id="studentHint">Sorted by last name. If two students share a name, the student ID tells them apart.</p>
+        </div>
+
+        <div class="field" id="emailField" hidden>
+          <label for="email">Email</label>
+          <input type="email" id="email" inputmode="email" autocomplete="off">
+          <p class="hint" id="emailHint"></p>
+        </div>
+
+        <p class="hint" style="margin-top:12px">
+          <a href="#" id="toEmail">Back to entering my email</a>
+        </p>
       </div>
 
-      <div class="field" id="emailField" hidden>
-        <label for="email">Email</label>
-        <input type="email" id="email" inputmode="email" autocomplete="off">
-        <p class="hint" id="emailHint"></p>
-      </div>
-
-      <div class="field" id="groupField" hidden>
+      <div class="field" id="groupField" style="margin-top:14px" hidden>
         <label for="group">Group name / members</label>
         <input type="text" id="group" placeholder="e.g. Table 3 — Priya, Luis, Rin">
         <p class="hint">Required for this assignment. List everyone in your group.</p>
@@ -422,6 +454,7 @@
   var assignment = null;
   var periodsAllowed = [];
   var studentsInPeriod = [];
+  var identity = null;            // set once an email has been matched
   var submitted = false;
   var current = {
     blob: null, source: '', mime: '', seconds: null, originalName: '', objectUrl: null
@@ -534,7 +567,7 @@
       o.value = p; o.textContent = 'Period ' + p;
       sel.appendChild(o);
     });
-    if (periodsAllowed.length === 1) { sel.value = periodsAllowed[0]; fillStudents(); }
+    if (periodsAllowed.length === 1) { sel.value = periodsAllowed[0]; }
 
     show($('groupField'), assignment.group_required);
     show($('recordCard'), assignment.allow_record);
@@ -621,6 +654,100 @@
         $('studentHint').textContent = 'Could not load period ' + period + '. ' + (err.message || '');
         refreshSubmit();
       });
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Identifying by email
+   *
+   * The dropdown is still here for students with no address on file, but
+   * typing an address is the default: a mis-tapped name submits work under
+   * someone else's record, and nobody notices until grading.
+   * ------------------------------------------------------------------ */
+
+  function useList(on) {
+    show($('idByList'), on);
+    show($('idByEmail'), !on);
+    if (on) {
+      identity = null;                       // switching modes clears the other
+      show($('identified'), false);
+      setNotice($('lookupError'), '');
+      show($('whichPeriodField'), false);
+    } else {
+      $('student').value = '';
+      $('period').value = '';
+      studentsInPeriod = [];
+      hideEmail();
+    }
+    refreshSubmit();
+  }
+
+  function lookup() {
+    var typed = $('lookup').value.trim();
+    setNotice($('lookupError'), '');
+    show($('identified'), false);
+    show($('whichPeriodField'), false);
+    identity = null;
+    refreshSubmit();
+
+    if (!typed) {
+      setNotice($('lookupError'), 'Type your school email address first.');
+      return;
+    }
+
+    $('btnFind').disabled = true;
+    $('btnFind').textContent = 'Checking…';
+
+    apiGet({ action: 'identify', a: assignment.id, email: typed })
+      .then(function (d) {
+        var s = d.student;
+        identity = { id: s.id, name: s.first + ' ' + s.last, periods: s.periods, period: s.periods[0] };
+
+        if (s.periods.length > 1) {
+          var sel = $('whichPeriod');
+          sel.innerHTML = '';
+          s.periods.forEach(function (p) {
+            var o = document.createElement('option');
+            o.value = p; o.textContent = 'Period ' + p;
+            sel.appendChild(o);
+          });
+          identity.period = s.periods[0];
+          show($('whichPeriodField'), true);
+        }
+
+        $('identified').innerHTML = '';
+        $('identified').textContent = 'You are ' + identity.name +
+          (s.periods.length === 1 ? ' — Period ' + s.periods[0] : '') + '.';
+        show($('identified'), true);
+        refreshSubmit();
+      })
+      .catch(function (err) {
+        var extra = '';
+        var hint = err.data && err.data.hint_domain;
+        if (err.data && err.data.not_found && hint) {
+          extra = ' Your school address usually ends ' + hint + '.';
+        }
+        setNotice($('lookupError'), (err.message || 'Could not check that address.') + extra);
+        refreshSubmit();
+      })
+      .then(function () {
+        $('btnFind').disabled = false;
+        $('btnFind').textContent = 'Find me';
+      });
+  }
+
+  /** Whoever we currently believe is submitting, from either path. */
+  function currentStudent() {
+    if (identity) return identity;
+    var id = $('student').value;
+    if (!id) return null;
+    for (var i = 0; i < studentsInPeriod.length; i++) {
+      if (studentsInPeriod[i].id === id) {
+        var s = studentsInPeriod[i];
+        return { id: s.id, name: s.first + ' ' + s.last, period: $('period').value,
+                 needs_email: s.needs_email, fromList: true };
+      }
+    }
+    return null;
   }
 
   function selectedStudent() {
@@ -959,12 +1086,12 @@
   }
 
   function localName() {
-    var s = selectedStudent();
+    var s = currentStudent();
     var ext = current.source === 'upload'
       ? ((current.originalName.split('.').pop() || extFor(current.mime)).toLowerCase())
       : extFor(current.mime);
     return [slug(assignment.id), s ? s.id : 'video',
-            s ? slug(s.last) + '-' + slug(s.first) : '', stamp(new Date())]
+            s ? slug(s.name) : '', stamp(new Date())]
            .filter(Boolean).join('_') + '.' + ext;
   }
 
@@ -983,9 +1110,13 @@
 
   function validate() {
     var problems = [];
-    if (!$('period').value) problems.push('Choose your period.');
-    var s = selectedStudent();
-    if (!s) problems.push('Choose your name.');
+    var s = currentStudent();
+    if (!s) {
+      problems.push($('idByList').hidden
+        ? 'Enter your school email and press Find me.'
+        : 'Choose your period and name.');
+    }
+    if (s && s.fromList && !$('period').value) problems.push('Choose your period.');
     if (s && s.needs_email) {
       var email = $('email').value.trim();
       if (!email) problems.push('Enter your email.');
@@ -1010,11 +1141,11 @@
   }
 
   function buildMetadata() {
-    var s = selectedStudent();
+    var s = currentStudent();
     return {
       assignment_id:     assignment.id,
       student_id:        s.id,
-      period:            $('period').value,
+      period:            s.period,
       group:             assignment.group_required ? $('group').value.trim() : '',
       // Only ever sent when the roster has no address for this student.
       email:             s.needs_email ? $('email').value.trim() : '',
@@ -1064,7 +1195,8 @@
         btn.disabled = true;
         $('submitHint').textContent = 'You can close this page.';
         // Nothing should be quietly changed after a successful submission.
-        ['period', 'student', 'email', 'group', 'file'].forEach(function (id) {
+        ['period', 'student', 'email', 'group', 'file',
+         'lookup', 'btnFind', 'whichPeriod'].forEach(function (id) {
           if ($(id)) $(id).disabled = true;
         });
         ['btnCamera', 'btnRecord', 'btnRedo'].forEach(function (id) { show($(id), false); });
@@ -1081,6 +1213,25 @@
   /* ------------------------------------------------------------------ *
    * Wire up
    * ------------------------------------------------------------------ */
+
+  $('btnFind').addEventListener('click', lookup);
+  $('lookup').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); lookup(); }
+  });
+  $('lookup').addEventListener('input', function () {
+    // Editing the address invalidates whoever was matched from the old one.
+    if (identity) {
+      identity = null;
+      show($('identified'), false);
+      show($('whichPeriodField'), false);
+      refreshSubmit();
+    }
+  });
+  $('whichPeriod').addEventListener('change', function () {
+    if (identity) { identity.period = this.value; refreshSubmit(); }
+  });
+  $('toList').addEventListener('click', function (e) { e.preventDefault(); useList(true); });
+  $('toEmail').addEventListener('click', function (e) { e.preventDefault(); useList(false); });
 
   $('period').addEventListener('change', fillStudents);
   $('student').addEventListener('change', onStudentChange);

@@ -356,6 +356,9 @@
    * A half-finished update then means "works, but capped", not "broken".
    */
   var CHUNK = 8 * 1024 * 1024;          // 8 MB; must be a multiple of 256 KB
+  // Below this, a failed direct upload can still fall back to the old
+  // base64-through-Apps-Script route, which tops out around 35 MB of payload.
+  var LEGACY_SAFE_BYTES = 24 * 1024 * 1024;
 
   function postJson(payload) {
     // No headers set: fetch defaults a string body to text/plain, which keeps
@@ -388,7 +391,10 @@
       size_bytes:        blob.size,
       duration_seconds:  metadata.duration_seconds,
       original_filename: metadata.original_filename,
-      client_time:       metadata.client_time
+      client_time:       metadata.client_time,
+      // Google will only accept the browser's PUT if the session was opened
+      // in this origin's name. See the matching note in Code.gs.
+      origin:            location.origin
     }).then(function (started) {
       if (!started.ok) {
         // An older script does not know this op. Everything else it says is a
@@ -401,14 +407,24 @@
         throw new Error(started.error);
       }
       note(API_URL, 'POST start', 'ok');
-      return sendChunks(blob, started.upload_url, onProgress)
-        .then(function (fileId) {
-          return postJson({ op: 'finish', token: started.token, file_id: fileId });
-        })
-        .then(function (done) {
-          note(API_URL, 'POST finish', done.ok ? 'ok' : (done.error || 'refused'));
-          if (!done.ok) throw new Error(done.error || 'The server would not file the upload.');
-          return done;
+      return sendChunks(blob, started.upload_url, onProgress).then(
+        function (fileId) {
+          return postJson({ op: 'finish', token: started.token, file_id: fileId })
+            .then(function (done) {
+              note(API_URL, 'POST finish', done.ok ? 'ok' : (done.error || 'refused'));
+              if (!done.ok) throw new Error(done.error || 'The server would not file the upload.');
+              return done;
+            });
+        },
+        function (err) {
+          // Refused before a single byte moved — that is a permission problem
+          // with the session, not a flaky network. A small file can still go
+          // the old way, so the student is not stranded.
+          if (err && err.beforeAnyBytes && blob.size <= LEGACY_SAFE_BYTES) {
+            note(API_URL, 'direct upload', 'refused before sending — using the older method');
+            return legacyUpload(blob, metadata);
+          }
+          throw err;
         });
     }).catch(function (err) {
       if (err instanceof TypeError) {
@@ -422,6 +438,7 @@
   /** PUT the blob to Google a slice at a time, resuming where it left off. */
   function sendChunks(blob, uploadUrl, onProgress) {
     var total = blob.size;
+    var sentAny = false;   // distinguishes "refused outright" from "dropped mid-way"
 
     function put(start) {
       var end = Math.min(start + CHUNK, total);
@@ -437,6 +454,7 @@
           };
         }
         xhr.onload = function () {
+          sentAny = true;
           if (xhr.status === 200 || xhr.status === 201) {
             var id = '';
             try { id = JSON.parse(xhr.responseText).id; } catch (e) {}
@@ -451,7 +469,11 @@
           }
           reject(new Error('Upload failed (HTTP ' + xhr.status + ').'));
         };
-        xhr.onerror = function () { reject(new Error('The connection dropped during the upload.')); };
+        xhr.onerror = function () {
+          var e = new Error('The connection dropped during the upload.');
+          e.beforeAnyBytes = !sentAny;
+          reject(e);
+        };
         xhr.send(blob.slice(start, end));
       }).then(function (r) {
         return r.done ? r.id : put(r.next);

@@ -47,6 +47,24 @@
   }
   .card h2{font-size:1rem;margin:0 0 12px;letter-spacing:.01em}
   .instructions{white-space:pre-wrap;margin:0}
+  .fieldrule{border:none;border-top:1px solid var(--line);margin:16px 0}
+  /* ---------------------------------------------------------------
+     The instructions are the one thing on this page a student must
+     actually read, so they get their own surface: a teal wash, an
+     accent edge, and a label instead of a heading buried in the body. */
+  .card.brief{
+    background:
+      linear-gradient(180deg, var(--glow), transparent 70%),
+      var(--card);
+    border-color:#27484b;
+    border-left:3px solid var(--accent);
+  }
+  .card.brief h2{
+    font-size:.74rem;font-weight:700;text-transform:uppercase;letter-spacing:.09em;
+    color:var(--accent);margin:0 0 10px;
+  }
+  .card.brief .instructions{font-size:1.02rem;line-height:1.62}
+  .card.brief .meta{margin-top:12px}
   label{display:block;font-weight:600;font-size:.875rem;margin:0 0 5px}
   .hint{color:var(--muted);font-size:.8rem;margin:5px 0 0;font-weight:400}
   select,input[type=text],input[type=email],input[type=file]{
@@ -236,8 +254,8 @@
     <div id="fatalExtra"></div>
   </div>
 
-  <section id="instructionsCard" class="card" hidden>
-    <h2>Instructions</h2>
+  <section id="instructionsCard" class="card brief" hidden>
+    <h2>What to do</h2>
     <p class="instructions" id="instructions"></p>
     <p class="meta" id="dueLine"></p>
   </section>
@@ -252,7 +270,16 @@
   <form id="form" hidden autocomplete="off">
 
     <section class="card">
-      <h2>Who are you?</h2>
+      <h2>Start here</h2>
+
+      <!-- Which assignment, then who you are. Both on this page, in order. -->
+      <div class="field" id="assignmentField">
+        <label for="assignmentPick">Assignment</label>
+        <select id="assignmentPick"></select>
+        <p class="hint">Pick the one your teacher asked for.</p>
+      </div>
+
+      <hr class="fieldrule">
 
       <!-- Preferred: type your address. No dropdown to mis-tap. -->
       <div id="idByEmail">
@@ -730,29 +757,83 @@
     $('fatal').hidden = false;
   }
 
+  /* The open assignments, for the dropdown. Kept here so switching between
+     them never costs another round trip. */
+  var openAssignments = [];
+
   function boot() {
     var wanted = qs('a');
 
-    if (!wanted) {
-      apiGet({ action: 'list' })
-        .then(function (d) { showPicker(d.assignments, 'No assignment was specified in the link.'); })
-        .catch(function (e) { fatal('Could not reach the class server. ' + (e.message || '')); });
-      return;
-    }
+    apiGet({ action: 'list' })
+      .then(function (d) {
+        openAssignments = d.assignments || [];
+        if (wanted) return loadAssignment(wanted);
 
-    apiGet({ action: 'config', a: wanted })
+        // No ?a= in the link: offer the list rather than a dead end. One open
+        // assignment means there is nothing to choose, so just open it.
+        if (openAssignments.length === 1) return loadAssignment(openAssignments[0].id);
+        if (!openAssignments.length) {
+          return fatal('There are no open assignments right now. Check with your teacher.');
+        }
+        fillAssignments('');
+        $('boot').hidden = true;
+        $('title').textContent = 'Pick your assignment';
+        $('subtitle').textContent = 'Then find your name.';
+        show($('form'), true);
+        show($('assignmentField'), true);
+      })
+      .catch(function (e) { fatal('Could not reach the class server. ' + (e.message || '')); });
+  }
+
+  /** Load one assignment and redraw. Used on first load and on every change
+      of the dropdown, so the two paths cannot drift apart. */
+  function loadAssignment(id) {
+    return apiGet({ action: 'config', a: id })
       .then(function (d) {
         assignment = d.assignment;
         periodsAllowed = d.periods || [];
+        fillAssignments(assignment.id);
         render();
+        // Keep the address bar honest, so a refresh or a bookmark comes back
+        // to the same assignment.
+        try {
+          history.replaceState(null, '',
+            location.pathname + '?a=' + encodeURIComponent(assignment.id));
+        } catch (e) {}
       })
       .catch(function (err) {
         if (err.data && err.data.assignments) {
-          showPicker(err.data.assignments, err.message);
+          openAssignments = err.data.assignments;
+          fillAssignments('');
+          $('boot').hidden = true;
+          $('title').textContent = 'Pick your assignment';
+          $('subtitle').textContent = err.message || '';
+          show($('form'), true);
+          show($('assignmentField'), true);
         } else {
           fatal('Could not reach the class server. ' + (err.message || ''));
         }
       });
+  }
+
+  /** Fill the dropdown. A closed assignment reached by direct link is not in
+      the open list, so it is added rather than silently replaced. */
+  function fillAssignments(selectedId) {
+    var sel = $('assignmentPick');
+    var list = openAssignments.slice();
+    if (selectedId && !list.some(function (a) { return a.id === selectedId; })) {
+      list.unshift({ id: selectedId, title: (assignment && assignment.title) || selectedId });
+    }
+    sel.innerHTML = selectedId ? '' : '<option value="">Choose an assignment…</option>';
+    list.forEach(function (a) {
+      var o = document.createElement('option');
+      o.value = a.id;
+      o.textContent = a.title;
+      sel.appendChild(o);
+    });
+    sel.value = selectedId || '';
+    // One choice is not a choice; don't make them confirm it.
+    show($('assignmentField'), list.length > 1 || !selectedId);
   }
 
   function showPicker(list, why) {
@@ -1479,6 +1560,18 @@
   /* ------------------------------------------------------------------ *
    * Wire up
    * ------------------------------------------------------------------ */
+
+  $('assignmentPick').addEventListener('change', function () {
+    if (!this.value) return;
+    // A different assignment may allow different periods, so whoever was
+    // matched under the old one has to be matched again. The recorded video
+    // is deliberately kept — it is usually the same video either way.
+    identity = null;
+    show($('identified'), false);
+    show($('whichPeriodField'), false);
+    show($('lookupError'), false);
+    loadAssignment(this.value).then(refreshSubmit);
+  });
 
   $('btnFind').addEventListener('click', lookup);
   $('lookup').addEventListener('keydown', function (e) {

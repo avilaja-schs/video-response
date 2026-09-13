@@ -345,25 +345,145 @@
   /**
    * The only function that sends a video anywhere.
    *
-   * This request MUST stay a "simple" CORS request, because Apps Script does
-   * not answer preflight OPTIONS — a preflighted POST fails before it is ever
-   * sent. That rules out three things, all of which look harmless:
+   * Preferred path: ask the script to open a resumable Drive upload, then send
+   * the raw bytes straight to Google in chunks. Apps Script never sees the
+   * video, so the old ~35 MB ceiling is gone, there is no base64 inflation,
+   * a dropped connection resumes instead of starting over, and real progress
+   * is available because Google answers CORS preflights.
    *
-   *   - any custom request header
-   *   - a Content-Type other than text/plain, form-urlencoded or multipart
-   *   - XMLHttpRequest upload-progress listeners
-   *
-   * The last one is the trap: merely attaching xhr.upload.onprogress flips the
-   * request to preflighted. That is why this uses fetch and why the submit UI
-   * shows an honest indeterminate bar instead of a percentage. A real
-   * percentage is not obtainable here without breaking the upload.
-   *
-   * No headers are set at all: fetch defaults a string body to
-   * text/plain;charset=UTF-8, which is exactly what is wanted.
+   * Fallback: if the script is an older deployment that does not know
+   * op:'start', quietly go back to posting the whole file base64-encoded.
+   * A half-finished update then means "works, but capped", not "broken".
    */
-  function uploadVideo(blob, metadata) {
+  var CHUNK = 8 * 1024 * 1024;          // 8 MB; must be a multiple of 256 KB
+
+  function postJson(payload) {
+    // No headers set: fetch defaults a string body to text/plain, which keeps
+    // this a "simple" CORS request. Apps Script cannot answer a preflight.
+    return fetch(API_URL, { method: 'POST', body: JSON.stringify(payload), redirect: 'follow' })
+      .then(function (r) {
+        if (!r.ok) throw new Error('the server answered HTTP ' + r.status);
+        return r.text();
+      })
+      .then(function (text) {
+        try { return JSON.parse(text); }
+        catch (e) {
+          throw new Error(/<html/i.test(text.slice(0, 400))
+            ? 'The server sent a web page instead of a result — the Web app may not be shared with "Anyone".'
+            : 'The server answered with something unreadable.');
+        }
+      });
+  }
+
+  function uploadVideo(blob, metadata, onProgress) {
+    return postJson({
+      op: 'start',
+      assignment_id:     metadata.assignment_id,
+      student_id:        metadata.student_id,
+      period:            metadata.period,
+      group:             metadata.group,
+      email:             metadata.email,
+      source:            metadata.source,
+      mime:              metadata.mime || blob.type || 'video/webm',
+      size_bytes:        blob.size,
+      duration_seconds:  metadata.duration_seconds,
+      original_filename: metadata.original_filename,
+      client_time:       metadata.client_time
+    }).then(function (started) {
+      if (!started.ok) {
+        // An older script does not know this op. Everything else it says is a
+        // real refusal and should be shown to the student.
+        if (/Unknown action|op/i.test(started.error || '') || started.error === undefined) {
+          note(API_URL, 'POST start', 'not supported — using the older method');
+          return legacyUpload(blob, metadata);
+        }
+        note(API_URL, 'POST start', started.error);
+        throw new Error(started.error);
+      }
+      note(API_URL, 'POST start', 'ok');
+      return sendChunks(blob, started.upload_url, onProgress)
+        .then(function (fileId) {
+          return postJson({ op: 'finish', token: started.token, file_id: fileId });
+        })
+        .then(function (done) {
+          note(API_URL, 'POST finish', done.ok ? 'ok' : (done.error || 'refused'));
+          if (!done.ok) throw new Error(done.error || 'The server would not file the upload.');
+          return done;
+        });
+    }).catch(function (err) {
+      if (err instanceof TypeError) {
+        note(API_URL, 'upload', 'blocked before sending (' + err.message + ')');
+        throw new Error('Could not reach the server. Check your connection and try again.');
+      }
+      throw err;
+    });
+  }
+
+  /** PUT the blob to Google a slice at a time, resuming where it left off. */
+  function sendChunks(blob, uploadUrl, onProgress) {
+    var total = blob.size;
+
+    function put(start) {
+      var end = Math.min(start + CHUNK, total);
+      return new Promise(function (resolve, reject) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('PUT', uploadUrl, true);
+        xhr.setRequestHeader('Content-Range', 'bytes ' + start + '-' + (end - 1) + '/' + total);
+        // Progress listeners are safe here: unlike Apps Script, Google's upload
+        // endpoint answers the CORS preflight they trigger.
+        if (onProgress && xhr.upload) {
+          xhr.upload.onprogress = function (ev) {
+            if (ev.lengthComputable) onProgress(Math.min(1, (start + ev.loaded) / total));
+          };
+        }
+        xhr.onload = function () {
+          if (xhr.status === 200 || xhr.status === 201) {
+            var id = '';
+            try { id = JSON.parse(xhr.responseText).id; } catch (e) {}
+            if (!id) return reject(new Error('Google did not return a file id.'));
+            if (onProgress) onProgress(1);
+            return resolve({ done: true, id: id });
+          }
+          if (xhr.status === 308) {                  // more to send
+            var range = xhr.getResponseHeader('Range');
+            var next = range ? Number(range.split('-')[1]) + 1 : end;
+            return resolve({ done: false, next: next });
+          }
+          reject(new Error('Upload failed (HTTP ' + xhr.status + ').'));
+        };
+        xhr.onerror = function () { reject(new Error('The connection dropped during the upload.')); };
+        xhr.send(blob.slice(start, end));
+      }).then(function (r) {
+        return r.done ? r.id : put(r.next);
+      });
+    }
+    return put(0);
+  }
+
+  function blobToBase64(blob) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () {
+        var s = String(reader.result);
+        // The header is "data:<mime>;base64," and the mime itself often
+        // contains a comma — "video/webm;codecs=vp8,opus". Splitting on the
+        // FIRST comma cuts into the codec list and silently corrupts the file,
+        // so anchor on the base64 marker instead.
+        var marker = ';base64,';
+        var at = s.indexOf(marker);
+        if (at > -1) return resolve(s.slice(at + marker.length));
+        var comma = s.indexOf(',');
+        resolve(comma > -1 ? s.slice(comma + 1) : s);
+      };
+      reader.onerror = function () { reject(new Error('Could not read the video for sending.')); };
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  /** The old whole-file-in-one-POST route, for scripts not yet updated. */
+  function legacyUpload(blob, metadata) {
     return blobToBase64(blob).then(function (b64) {
-      var payload = JSON.stringify({
+      return postJson({
         assignment_id:     metadata.assignment_id,
         student_id:        metadata.student_id,
         period:            metadata.period,
@@ -376,33 +496,10 @@
         client_time:       metadata.client_time,
         data_b64:          b64
       });
-
-      return fetch(API_URL, { method: 'POST', body: payload, redirect: 'follow' })
-        .then(function (r) {
-          if (!r.ok) throw new Error('the server answered HTTP ' + r.status);
-          return r.text();
-        })
-        .then(function (text) {
-          var data;
-          try {
-            data = JSON.parse(text);
-          } catch (e) {
-            note(API_URL, 'POST', 'unreadable answer');
-            throw new Error(/<html/i.test(text.slice(0, 400))
-              ? 'The server sent a web page instead of a result — the Web app may not be shared with "Anyone".'
-              : 'The server answered with something unreadable.');
-          }
-          note(API_URL, 'POST', data.ok ? 'ok' : (data.error || 'refused'));
-          if (!data.ok) throw new Error(data.error || 'The server refused it.');
-          return data;
-        })
-        .catch(function (err) {
-          if (err instanceof TypeError) {
-            note(API_URL, 'POST', 'blocked before sending (' + err.message + ')');
-            throw new Error('Could not reach the server. Check your connection and try again.');
-          }
-          throw err;
-        });
+    }).then(function (data) {
+      note(API_URL, 'POST (older method)', data.ok ? 'ok' : (data.error || 'refused'));
+      if (!data.ok) throw new Error(data.error || 'The server refused it.');
+      return data;
     });
   }
 
@@ -1200,16 +1297,27 @@
     // to tell "working" from "stuck".
     var started = Date.now();
     var size = humanBytes(current.blob.size);
+    var pct = null;                       // null until Google reports progress
     var ticker = setInterval(paint, 1000);
     function paint() {
       var secs = Math.round((Date.now() - started) / 1000);
-      $('progressText').textContent = 'Sending ' + size + '… ' + secs + 's' +
-        (secs > 25 ? ' — large videos can take a few minutes on school wifi.' : '');
+      $('progressText').textContent = 'Sending ' + size + '… ' +
+        (pct === null ? secs + 's' : pct + '%  ·  ' + secs + 's') +
+        (secs > 25 && pct !== null && pct < 90 ? '  — large videos take a while on school wifi.' : '');
     }
     paint();
     function stopTicker() { clearInterval(ticker); show($('progressWrap'), false); }
 
-    uploadVideo(current.blob, buildMetadata())
+    // The resumable path gives real byte counts. The legacy fallback gives
+    // none, so the bar stays indeterminate there rather than inventing one.
+    function onProgress(fraction) {
+      pct = Math.round(fraction * 100);
+      $('progressBar').classList.remove('indet');
+      $('progressFill').style.width = pct + '%';
+      paint();
+    }
+
+    uploadVideo(current.blob, buildMetadata(), onProgress)
       .then(function (result) {
         submitted = true;
         stopTicker();

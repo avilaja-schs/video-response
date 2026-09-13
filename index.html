@@ -5,56 +5,83 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Video Submission</title>
 <style>
+  /* Deep teal lab — the same palette as the teacher's dashboard, so the two
+     halves of this thing look like one thing. Dark always; no system switch. */
   :root{
-    --bg:#f6f7f9; --card:#ffffff; --ink:#16181d; --muted:#5b6270;
-    --line:#d8dce3; --accent:#1d4ed8; --accent-ink:#ffffff;
-    --danger:#b42318; --danger-bg:#fef3f2; --danger-line:#fda29b;
-    --ok:#067647; --ok-bg:#ecfdf3; --warn-bg:#fffaeb; --warn-line:#fedf89; --warn-ink:#93370d;
-    --radius:10px;
-  }
-  @media (prefers-color-scheme: dark){
-    :root{
-      --bg:#101216; --card:#181b21; --ink:#e9ecf1; --muted:#a0a8b8;
-      --line:#2c313b; --accent:#5b8bff; --accent-ink:#0b1020;
-      --danger:#ff9c92; --danger-bg:#2a1614; --danger-line:#6b2b23;
-      --ok:#6fdba0; --ok-bg:#12251c; --warn-bg:#2a2113; --warn-line:#5d4818; --warn-ink:#f5d68a;
-    }
+    --bg:#0d1518; --card:#132025; --ink:#e4f0f0; --muted:#8aa3a6;
+    --line:#1f3238; --accent:#4ecdc4; --accent-ink:#06211f;
+    --danger:#ff7a6b; --danger-bg:#2a1512; --danger-line:#53241d;
+    --ok:#6ee7a8; --ok-bg:#0f2620;
+    --warn-bg:#2a2314; --warn-line:#57481f; --warn-ink:#f0cf8a;
+    --glow:rgba(78,205,196,.16);
+    --sheen:rgba(255,255,255,.035);
+    --radius:18px;
   }
   *{box-sizing:border-box}
   html,body{margin:0;padding:0}
   body{
-    background:var(--bg); color:var(--ink);
+    color:var(--ink);
     font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     padding:24px 16px 64px;
+    min-height:100vh;
+    background:
+      radial-gradient(1000px 380px at 20% -10%, var(--glow), transparent 62%),
+      var(--bg);
+    background-attachment:fixed;
   }
-  .wrap{max-width:720px;margin:0 auto}
+  .wrap{max-width:720px;margin:0 auto;position:relative;z-index:1}
   header.page{margin-bottom:20px}
-  h1{font-size:1.4rem;margin:0 0 6px;line-height:1.25}
+  h1{
+    font-size:1.45rem;margin:0 0 6px;line-height:1.25;letter-spacing:-.01em;
+    display:flex;align-items:center;gap:10px;
+  }
+  h1::before{
+    content:'';flex:none;width:6px;height:24px;border-radius:99px;
+    background:linear-gradient(var(--accent), transparent);
+  }
   .sub{color:var(--muted);font-size:.9rem;margin:0}
   .card{
     background:var(--card); border:1px solid var(--line); border-radius:var(--radius);
-    padding:18px; margin-bottom:16px;
+    padding:20px; margin-bottom:16px;
+    box-shadow:0 1px 0 var(--sheen) inset, 0 2px 10px rgba(0,0,0,.22);
   }
   .card h2{font-size:1rem;margin:0 0 12px;letter-spacing:.01em}
   .instructions{white-space:pre-wrap;margin:0}
   label{display:block;font-weight:600;font-size:.875rem;margin:0 0 5px}
   .hint{color:var(--muted);font-size:.8rem;margin:5px 0 0;font-weight:400}
   select,input[type=text],input[type=email],input[type=file]{
-    width:100%; padding:10px 11px; font:inherit; font-size:.95rem;
-    color:var(--ink); background:var(--card);
-    border:1px solid var(--line); border-radius:8px;
+    width:100%; padding:11px 13px; font:inherit; font-size:.95rem;
+    color:var(--ink); background:var(--bg);
+    border:1px solid var(--line); border-radius:12px;
   }
+  select:focus,input:focus{
+    outline:none;border-color:var(--accent);box-shadow:0 0 0 4px var(--glow);
+  }
+  /* The browser's own file button arrives white and square. Dress it to match
+     the other buttons, or it is the one bright rectangle on the page. */
+  input[type=file]{padding:9px 11px;cursor:pointer}
+  input[type=file]::file-selector-button{
+    font:inherit;font-weight:600;font-size:.9rem;
+    margin:0 12px 0 0;padding:8px 16px;border-radius:99px;cursor:pointer;
+    border:1px solid var(--line);background:var(--card);color:var(--ink);
+    transition:border-color .12s;
+  }
+  input[type=file]:hover::file-selector-button{border-color:var(--accent)}
   select:disabled,input:disabled{opacity:.6}
   input[readonly]{background:var(--bg);color:var(--muted)}
   .field{margin-bottom:14px}
   .field:last-child{margin-bottom:0}
   button{
-    font:inherit;font-weight:600;padding:10px 16px;border-radius:8px;
+    font:inherit;font-weight:600;padding:11px 20px;border-radius:99px;
     border:1px solid var(--line); background:var(--card); color:var(--ink); cursor:pointer;
+    transition:background .12s, border-color .12s, box-shadow .12s;
   }
   button:hover:not(:disabled){border-color:var(--muted)}
   button:disabled{opacity:.45;cursor:not-allowed}
-  button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+  button.primary{
+    background:var(--accent);border-color:var(--accent);color:var(--accent-ink);
+    box-shadow:0 0 0 4px var(--glow);
+  }
   button.danger{background:var(--danger-bg);border-color:var(--danger-line);color:var(--danger)}
   .btnrow{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
   video{
@@ -108,9 +135,93 @@
   [hidden]{display:none !important}
   .skeleton{color:var(--muted)}
   footer.page{color:var(--muted);font-size:.78rem;text-align:center;margin-top:28px}
+  /* =================================================================
+     The reef. Line-art sharks cruising behind the page, fixed so they
+     do not lengthen it, pointer-events off so they never eat a tap.
+     Anyone who has asked their machine for less motion gets a still
+     scene instead of no scene. */
+  .reef{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+  .lane{position:absolute;left:0;animation:swim linear infinite}
+  .shark{
+    display:block;color:var(--accent);
+    animation:bob 7s ease-in-out infinite alternate;
+  }
+  .shark .tail{
+    transform-box:view-box;transform-origin:32px 45px;
+    animation:flick 2.2s ease-in-out infinite alternate;
+    animation-delay:var(--flick,0s);
+  }
+  @keyframes swim{ from{transform:translateX(-32vw)} to{transform:translateX(132vw)} }
+  @keyframes bob{ from{transform:translateY(-10px)} to{transform:translateY(10px)} }
+  @keyframes flick{ from{transform:rotate(-8deg)} to{transform:rotate(8deg)} }
+
+  /* Each shark gets its own depth, size, pace and phase, so the school
+     never falls into lockstep. Negative delays start them mid-crossing. */
+  .l1{top:9%;  width:210px; opacity:.20; animation-duration:64s; animation-delay:-8s}
+  .l2{top:41%; width:130px; opacity:.14; animation-duration:92s; animation-delay:-38s}
+  .l3{top:69%; width:280px; opacity:.10; animation-duration:78s; animation-delay:-60s}
+  .l1 .shark{--flick:0s;    animation-duration:6s}
+  .l2 .shark{--flick:-.9s;  animation-duration:9s}
+  .l3 .shark{--flick:-1.5s; animation-duration:11s}
+
+  @media (prefers-reduced-motion: reduce){
+    .lane,.shark,.shark .tail{animation:none}
+    .l1{transform:translateX(8vw)} .l2{transform:translateX(52vw)} .l3{transform:translateX(28vw)}
+  }
 </style>
 </head>
 <body>
+
+<!-- Drawn once, used three times. Hand-rolled paths — no library, per the brief. -->
+<svg width="0" height="0" aria-hidden="true" style="position:absolute">
+  <!-- Stroke settings live on the symbol, not in the stylesheet: a <use>
+       builds a shadow tree that outside selectors cannot reach, so CSS rules
+       would leave these as filled black silhouettes. Inherited presentation
+       attributes do cross that boundary. -->
+  <symbol id="sharkArt" viewBox="0 0 160 90"
+          fill="none" stroke="currentColor" stroke-width="2.2"
+          stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke">
+    <!-- Seen from directly above, so everything is mirrored about y=45: two
+         pectorals, two pelvics, and a caudal that reads as a narrow blade
+         rather than the tall fan you get from the side. Snout points right,
+         which is the way they swim across the page. -->
+    <g class="tail">
+      <path d="M32 45 C24 41, 13 38, 3 35 C11 41, 13 44, 13 45
+               C13 46, 11 49, 3 55 C13 52, 24 49, 32 45 Z"/>
+    </g>
+    <!-- Body: torpedo, narrowing to a slim peduncle at the tail. -->
+    <path d="M152 45 C138 32, 116 26, 94 26 C70 26, 46 32, 32 40
+             L30 43 L30 47 L32 50
+             C46 58, 70 64, 94 64 C116 64, 138 58, 152 45 Z"/>
+    <!-- Pectoral fins, swept back. Both ends land ON the body outline rather
+         than crossing it, or the fin reads as a stick through the animal. -->
+    <path d="M100 27 C96 17, 84 9, 68 5 C80 13, 88 20, 92 27.5"/>
+    <path d="M100 63 C96 73, 84 81, 68 85 C80 77, 88 70, 92 62.5"/>
+    <!-- Pelvic fins, the smaller pair, further back. -->
+    <path d="M62 32 C58 27, 51 23, 44 21 C50 26, 54 29, 56 33.5"/>
+    <path d="M62 58 C58 63, 51 67, 44 69 C50 64, 54 61, 56 56.5"/>
+    <!-- Dorsals ride the centreline. Kept slim: any wider and they read as
+         eyes staring up out of the middle of the back. -->
+    <path d="M104 45 C94 42.6, 82 43, 72 45 C82 47, 94 47.4, 104 45 Z"/>
+    <path d="M56 45 C51 44.2, 46 44.4, 42 45 C46 45.6, 51 45.8, 56 45 Z"/>
+    <!-- Gill slits, both flanks. -->
+    <path d="M122 33 C119 36, 118 39, 118 41"/>
+    <path d="M127 32 C124 35, 123 38, 123 40"/>
+    <path d="M132 31 C129 34, 128 37, 128 39"/>
+    <path d="M122 57 C119 54, 118 51, 118 49"/>
+    <path d="M127 58 C124 55, 123 52, 123 50"/>
+    <path d="M132 59 C129 56, 128 53, 128 51"/>
+    <circle cx="141" cy="39" r="1.5"/>
+    <circle cx="141" cy="51" r="1.5"/>
+  </symbol>
+</svg>
+
+<div class="reef" aria-hidden="true">
+  <div class="lane l1"><svg class="shark" viewBox="0 0 160 90"><use href="#sharkArt"/></svg></div>
+  <div class="lane l2"><svg class="shark" viewBox="0 0 160 90"><use href="#sharkArt"/></svg></div>
+  <div class="lane l3"><svg class="shark" viewBox="0 0 160 90"><use href="#sharkArt"/></svg></div>
+</div>
+
 <div class="wrap">
 
   <header class="page">

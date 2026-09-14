@@ -48,6 +48,7 @@
   .card h2{font-size:1rem;margin:0 0 12px;letter-spacing:.01em}
   .instructions{white-space:pre-wrap;margin:0}
   .fieldrule{border:none;border-top:1px solid var(--line);margin:16px 0}
+  .hint.pickhint{color:var(--accent)}
   /* ---------------------------------------------------------------
      The instructions are the one thing on this page a student must
      actually read, so they get their own surface: a teal wash, an
@@ -269,7 +270,7 @@
 
   <form id="form" hidden autocomplete="off">
 
-    <section class="card">
+    <section class="card" id="startCard">
       <h2>Start here</h2>
 
       <!-- Which assignment, then who you are. Both on this page, in order. -->
@@ -277,12 +278,13 @@
         <label for="assignmentPick">Assignment</label>
         <select id="assignmentPick"></select>
         <p class="hint">Pick the one your teacher asked for.</p>
+        <p class="hint pickhint" id="pickHint" hidden></p>
       </div>
 
-      <hr class="fieldrule">
+      <hr class="fieldrule" id="fieldRule" hidden>
 
       <!-- Preferred: type your address. No dropdown to mis-tap. -->
-      <div id="idByEmail">
+      <div id="idByEmail" hidden>
         <div class="field">
           <label for="lookup">Your school email</label>
           <div class="btnrow">
@@ -372,7 +374,7 @@
       <video id="filePlayback" playsinline controls hidden style="margin-top:10px"></video>
     </section>
 
-    <section class="card">
+    <section class="card" id="submitCard" hidden>
       <h2>Submit</h2>
       <div class="btnrow">
         <button type="submit" id="btnSubmit" class="primary" disabled>Submit video</button>
@@ -761,28 +763,59 @@
      them never costs another round trip. */
   var openAssignments = [];
 
+  /* Nothing is ever pre-selected, not even when the link names an assignment.
+     A pre-filled dropdown is a submission waiting to land in the wrong folder:
+     the student who does not read it still gets *an* answer, and nobody finds
+     out until grading. Making the choice deliberate costs one tap and removes
+     a whole class of misfiled work. The ?a= in a link is kept only as a hint
+     of which one to pick. */
   function boot() {
-    var wanted = qs('a');
+    var hint = qs('a');
 
     apiGet({ action: 'list' })
       .then(function (d) {
         openAssignments = d.assignments || [];
-        if (wanted) return loadAssignment(wanted);
+        $('boot').hidden = true;
 
-        // No ?a= in the link: offer the list rather than a dead end. One open
-        // assignment means there is nothing to choose, so just open it.
-        if (openAssignments.length === 1) return loadAssignment(openAssignments[0].id);
         if (!openAssignments.length) {
           return fatal('There are no open assignments right now. Check with your teacher.');
         }
+
         fillAssignments('');
-        $('boot').hidden = true;
         $('title').textContent = 'Pick your assignment';
-        $('subtitle').textContent = 'Then find your name.';
+        $('subtitle').textContent = 'Then find your name and record.';
         show($('form'), true);
         show($('assignmentField'), true);
+        awaitingPick(true);
+
+        // A link that named an assignment says so in words, without choosing
+        // for them — they still have to select it themselves.
+        var named = openAssignments.filter(function (a) { return a.id === hint; })[0];
+        if (named) {
+          $('pickHint').textContent = 'Your teacher’s link was for “' + named.title + '”.';
+          show($('pickHint'), true);
+          return;
+        }
+        // A link naming something that is not open — closed, or renamed — is
+        // worth loading anyway, so the student gets "this is closed" rather
+        // than a picker that silently lacks the one they were sent to.
+        if (hint) return loadAssignment(hint);
       })
       .catch(function (e) { fatal('Could not reach the class server. ' + (e.message || '')); });
+  }
+
+  /** Everything below the picker stays out of sight until one is chosen. */
+  function awaitingPick(waiting) {
+    show($('idByEmail'), !waiting);
+    show($('fieldRule'), !waiting);
+    show($('instructionsCard'), !waiting);
+    show($('submitCard'), !waiting);
+    if (waiting) {
+      show($('recordCard'), false);
+      show($('uploadCard'), false);
+      show($('closedCard'), false);
+      show($('idByList'), false);
+    }
   }
 
   /** Load one assignment and redraw. Used on first load and on every change
@@ -793,6 +826,8 @@
         assignment = d.assignment;
         periodsAllowed = d.periods || [];
         fillAssignments(assignment.id);
+        show($('pickHint'), false);
+        awaitingPick(false);
         render();
         // Keep the address bar honest, so a refresh or a bookmark comes back
         // to the same assignment.
@@ -810,6 +845,7 @@
           $('subtitle').textContent = err.message || '';
           show($('form'), true);
           show($('assignmentField'), true);
+          awaitingPick(true);
         } else {
           fatal('Could not reach the class server. ' + (err.message || ''));
         }
@@ -824,7 +860,9 @@
     if (selectedId && !list.some(function (a) { return a.id === selectedId; })) {
       list.unshift({ id: selectedId, title: (assignment && assignment.title) || selectedId });
     }
-    sel.innerHTML = selectedId ? '' : '<option value="">Choose an assignment…</option>';
+    // The placeholder always stays in the list, so a student who realises they
+    // picked wrong can get back to "nothing chosen" instead of guessing.
+    sel.innerHTML = '<option value="">Choose an assignment…</option>';
     list.forEach(function (a) {
       var o = document.createElement('option');
       o.value = a.id;
@@ -832,8 +870,7 @@
       sel.appendChild(o);
     });
     sel.value = selectedId || '';
-    // One choice is not a choice; don't make them confirm it.
-    show($('assignmentField'), list.length > 1 || !selectedId);
+    show($('assignmentField'), true);
   }
 
   function showPicker(list, why) {
@@ -867,7 +904,18 @@
     $('dueLine').textContent = assignment.due_date ? 'Due ' + assignment.due_date : '';
     show($('instructionsCard'), true);
 
-    if (assignment.status === 'closed') { show($('closedCard'), true); return; }
+    if (assignment.status === 'closed') {
+      // Closed means closed: no identity field, no recorder, no Submit. The
+      // picker stays so they can switch to something that is open.
+      show($('closedCard'), true);
+      show($('idByEmail'), false);
+      show($('fieldRule'), false);
+      show($('idByList'), false);
+      show($('recordCard'), false);
+      show($('uploadCard'), false);
+      show($('submitCard'), false);
+      return;
+    }
 
     show($('form'), true);
 
@@ -1562,7 +1610,18 @@
    * ------------------------------------------------------------------ */
 
   $('assignmentPick').addEventListener('change', function () {
-    if (!this.value) return;
+    if (!this.value) {                      // back to "nothing chosen"
+      assignment = null;
+      identity = null;
+      show($('identified'), false);
+      show($('whichPeriodField'), false);
+      show($('lookupError'), false);
+      $('title').textContent = 'Pick your assignment';
+      $('subtitle').textContent = 'Then find your name and record.';
+      awaitingPick(true);
+      refreshSubmit();
+      return;
+    }
     // A different assignment may allow different periods, so whoever was
     // matched under the old one has to be matched again. The recorded video
     // is deliberately kept — it is usually the same video either way.
